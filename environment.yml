@@ -1,0 +1,21 @@
+name: dissertation
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.6
+  - pip
+  - matplotlib
+  - numpy
+  - pillow
+  - cuda91
+  - pytorch
+  - torchvision
+  - pip:
+    - imageio
+    - opencv-contrib-python
+    - scipy
+    - sk-video
+    - tqdm
+    - visdom
+    - vispy
