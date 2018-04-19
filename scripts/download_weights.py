@@ -37,7 +37,7 @@ class Segment:
         self._temp_file.close()
         self._connection.close()
 
-    async def __aiter__(self):
+    def __aiter__(self):
         return self
 
     async def __anext__(self):
@@ -96,7 +96,10 @@ class Accelerator:
         self._request.close()
         self._session.close()
 
-    def __aexit__(self):
+    def __enter__(self):
+        return self
+
+    def __exit__(self):
         self.close()
 
 
@@ -111,10 +114,11 @@ async def download_weights(uri: str, filename: str = None, dir: str = './',
     if segments is not None:
         assert segments > 1
         accel = await Accelerator.accelerate(uri, filepath, segments)
-        with tqdm(total=accel.size, desc=f"Downloading weights '{filename}'",
-                  unit='B', unit_scale=True, unit_divisor=1024) as bar:
-            async for packet in accel.packets():
-                bar.update(len(packet))
+        with accel:
+            with tqdm(total=accel.size, desc=f"Downloading weights '{filename}'",
+                      unit='B', unit_scale=True, unit_divisor=1024) as bar:
+                async for packet in accel.packets():
+                    bar.update(len(packet))
     else:
         async def to_stream(response, chunk_size=1024):
             while True:
