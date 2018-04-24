@@ -1,6 +1,5 @@
 import contextlib
 import numbers
-import subprocess as sp
 import io
 from fractions import Fraction
 from subprocess import Popen, DEVNULL, PIPE
@@ -8,7 +7,6 @@ import json
 import numpy as np
 from PIL import Image
 from typing import Tuple, Optional, Dict, Any, Union, List
-from collections import OrderedDict
 import copy
 import shlex
 

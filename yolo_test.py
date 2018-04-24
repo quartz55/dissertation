@@ -5,7 +5,7 @@ import imageio
 import numpy as np
 from tqdm import tqdm
 
-from cimc.models.yolov3 import COCO_LABELS
+from cimc.models.labels import COCO_LABELS
 import cimc.core.bbox as bbox
 from cimc.core.bbox import BoundingBox, Point
 import re
@@ -91,8 +91,6 @@ def test_yolo2(duration: int):
                     boxes = [post_process(box) for box in boxes[0]]
                     result = draw_detections(Image.fromarray(image), boxes, class_colors)
                     writer.append_data(np.array(result))
-                    # info = {k: f"{t*1000:.2f}ms" for k, t in timings.items()}
-                    # bar.write(str(info) + '\n' + f"{1 / timings['total']:.1f} fps")
 
     net = YoloV2.pre_trained('resources/yolov2.weights', confidence=0.25)
     net.cuda()
@@ -117,21 +115,14 @@ def test_yolo3(duration: int = None):
                 for index, frame in frames:
                     if frame_stop is not None and index >= frame_stop:
                         break
-                    boxes, image, timings = net.detect_image(Image.fromarray(frame))
+                    boxes, image, _timings = net.detect_image(Image.fromarray(frame))
                     bboxes = [post_process(box) for box in boxes]
                     result = draw_detections(image, bboxes, class_colors)
                     writer.append_data(np.array(result))
-                    # result.show()
-                    # input('Press ENTER to continue')
-                    # info = {k: f"{t*1000:.2f}ms" for k, t in timings.items()}
-                    # bar.write(str(info) + '\n' + f"{1 / timings['total']:.1f} fps")
 
     net = YoloV3.pre_trained('resources/yolov3.weights')
     net.cuda()
     detect_video(net, 'resources/goldeneye.mp4', 'goldeneye-yolo3.mp4', duration)
-    # detect_video(net, 'resources/bvs.mp4', 'bvs-yolo3.mp4')
-    # detect_video_custom(net, 'resources/goldedRneye.mp4')
-    # detect_and_show(net, 'resources/people-2.jpg')
 
 
 def main():

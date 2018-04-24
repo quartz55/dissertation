@@ -36,17 +36,30 @@ class TqdmLoggingHandler(logging.StreamHandler):
             self.handleError(record)
 
 
-fmt = coloredlogs.ColoredFormatter(fmt="%(asctime)s %(levelname)8s %(filename)s (%(funcName)s:%(lineno)d)\n%(message)s",
-                                   field_styles={'asctime': {'color': 'magenta'},
-                                                 'levelname': {'color': 'cyan', 'bold': True},
-                                                 'filename': {'color': 'red'},
-                                                 'funcName': {'color': 'black', 'inverse': True}})
+fmt = coloredlogs.ColoredFormatter(
+    fmt=
+    "%(asctime)s %(levelname)8s %(filename)s (%(funcName)s:%(lineno)d)\n%(message)s",
+    field_styles={
+        'asctime': {
+            'color': 'magenta'
+        },
+        'levelname': {
+            'color': 'cyan',
+            'bold': True
+        },
+        'filename': {
+            'color': 'red'
+        },
+        'funcName': {
+            'color': 'black',
+            'inverse': True
+        }
+    })
 handler = TqdmLoggingHandler()
 handler.setFormatter(fmt)
 logger = logging.getLogger()
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
-
 
 # endregion
 
@@ -80,13 +93,21 @@ class SegmentChunk:
 
 
 class Segment:
-    __slots__ = ['chunk_size', '_temp_file', '_connection', 'done', 'index', 'range', '_timings']
+    __slots__ = [
+        'chunk_size', '_temp_file', '_connection', 'done', 'index', 'range',
+        '_timings'
+    ]
 
-    def __init__(self, connection: aiohttp.ClientResponse, chunk_size=1024 * 1024,
-                 index: int = None, range: Tuple[int, int] = None):
+    def __init__(self,
+                 connection: aiohttp.ClientResponse,
+                 chunk_size=1024 * 1024,
+                 index: int = None,
+                 range: Tuple[int, int] = None):
         self.chunk_size = chunk_size
-        self._temp_file = tmp.NamedTemporaryFile(prefix=f"{tmp.gettempprefix()}.s{index}",
-                                                 suffix='tmp', dir=os.getcwd())
+        self._temp_file = tmp.NamedTemporaryFile(
+            prefix=f"{tmp.gettempprefix()}.s{index}",
+            suffix='tmp',
+            dir=os.getcwd())
         self._connection: aiohttp.ClientResponse = connection
         self.done = False
         self.index = index
@@ -111,7 +132,9 @@ class Segment:
         if not chunk:
             self._timings['end'] = time.time()
             self.done = True
-            logger.debug(f"{self} downloaded in {round(self._timings['end']-self._timings['start'])}s")
+            logger.debug(
+                f"{self} downloaded in {round(self._timings['end']-self._timings['start'])}s"
+            )
             raise StopAsyncIteration
         self._temp_file.write(chunk)
         return SegmentChunk(chunk, self.index, self.range)
@@ -127,16 +150,22 @@ class Segment:
 
 
 class Download:
-    __slots__ = ['filename', 'filepath', 'uri', 'headers', '_file',
-                 '_session', '_own_session', '_response', '_prepared']
+    __slots__ = [
+        'filename', 'filepath', 'uri', 'headers', '_file', '_session',
+        '_own_session', '_response', '_prepared'
+    ]
 
-    def __init__(self, uri: str, filename: str = None, dir: str = './',
+    def __init__(self,
+                 uri: str,
+                 filename: str = None,
+                 dir: str = './',
                  session: aiohttp.ClientSession = None):
         if filename is None:
             filename = urllib.parse.urlparse(uri).path
             filename = os.path.basename(filename)
         self.filename = filename
-        self.filepath = os.path.normpath(os.path.join(os.getcwd(), dir, filename))
+        self.filepath = os.path.normpath(
+            os.path.join(os.getcwd(), dir, filename))
         self.uri = uri
         self.headers: Dict[str, str] = None
         self._file = None
@@ -166,8 +195,7 @@ class Download:
             await self._file.close()
         if self._response is not None and not self._response.closed:
             await self._response.release()
-        if (self._session is not None
-                and self._own_session
+        if (self._session is not None and self._own_session
                 and not self._session.closed):
             await self._session.close()
 
@@ -209,7 +237,8 @@ class AccelDownload(Download):
 
     async def __aiter__(self):
         async def gen():
-            chunks_stream = stream.merge(*[stream.iterate(segm) for segm in self._segments])
+            chunks_stream = stream.merge(
+                *[stream.iterate(segm) for segm in self._segments])
             async with chunks_stream.stream() as chunks:
                 async for chunk in chunks:
                     yield chunk
@@ -230,18 +259,22 @@ class AccelDownload(Download):
             ranges: List[Tuple[int, int]] = []
             for i in range(self.num_segments):
                 start = i * segment_size
-                end = self.size if i == self.num_segments - 1 else ((i + 1) * segment_size) - 1
+                end = self.size if i == self.num_segments - 1 else (
+                    (i + 1) * segment_size) - 1
                 ranges.append((start, end))
-            logger.debug(f"Preparing {self.num_segments} requests for '{self.uri}'")
+            logger.debug(
+                f"Preparing {self.num_segments} requests for '{self.uri}'")
             for i, r in enumerate(ranges):
                 byte_range = f"bytes={r[0]}-{r[1]}"
-                conn = await self._session.get(self.uri, headers={'range': byte_range})
+                conn = await self._session.get(
+                    self.uri, headers={'range': byte_range})
                 self._segments.append(Segment(conn, index=i, range=r))
             basename = os.path.basename(self.uri)
-            logger.debug(f"'{basename}' ready for download (size={self.size} bytes, "
-                         f"num_segments={self.num_segments}, "
-                         f"segment_size={segment_size}, "
-                         f"segments={ranges})")
+            logger.debug(
+                f"'{basename}' ready for download (size={self.size} bytes, "
+                f"num_segments={self.num_segments}, "
+                f"segment_size={segment_size}, "
+                f"segments={ranges})")
         return self
 
     async def close(self):
@@ -249,9 +282,12 @@ class AccelDownload(Download):
         if all_done:
             self._mkdir_p()
             async with aiofiles.open(self.filepath, 'wb') as file:
-                logger.info(f"Merging downloaded segments({self.num_segments}) into final file '{self.filepath}'")
+                logger.info(
+                    f"Merging downloaded segments({self.num_segments}) into final file '{self.filepath}'"
+                )
                 for segment in self._segments:
-                    logger.debug(f"Merging segment {segment.index} of '{self.uri}'")
+                    logger.debug(
+                        f"Merging segment {segment.index} of '{self.uri}'")
                     segment.temp_file.seek(0)
                     while True:
                         buf = segment.temp_file.read(1024 * 1024)
@@ -260,28 +296,49 @@ class AccelDownload(Download):
                         await file.write(buf)
                     await segment.close()
         else:
-            logger.warning(f"Not all segments were downloaded successfully. Not saving file to disk")
+            logger.warning(
+                f"Not all segments were downloaded successfully. Not saving file to disk"
+            )
             for s in self._segments:
                 await s.close()
         await super().close()
 
 
-async def download_file(uri: str, filename: str = None, dir: str = None,
-                        segments: int = None, session: aiohttp.ClientSession = None):
+async def download_file(uri: str,
+                        filename: str = None,
+                        dir: str = None,
+                        segments: int = None,
+                        session: aiohttp.ClientSession = None):
     if segments is not None:
         assert segments > 1
-        async with AccelDownload(uri, filename=filename, dir=dir, segments=segments, session=session) as download:
-            with tqdm(total=download.size, desc=f"Downloading '{download.filename}",
-                      dynamic_ncols=True, postfix=dict(segments=download.num_segments),
-                      unit='B', unit_scale=True, unit_divisor=1024) as bar:
+        async with AccelDownload(
+                uri,
+                filename=filename,
+                dir=dir,
+                segments=segments,
+                session=session) as download:
+            with tqdm(
+                    total=download.size,
+                    desc=f"Downloading '{download.filename}",
+                    dynamic_ncols=True,
+                    postfix=dict(segments=download.num_segments),
+                    unit='B',
+                    unit_scale=True,
+                    unit_divisor=1024) as bar:
                 output_path = download.filepath
                 async for segment_chunk in download:
                     bar.update(len(segment_chunk))
 
     else:
-        async with Download(uri, filename=filename, dir=dir, session=session) as download:
-            with tqdm(total=download.size, desc=f"Downloading '{download.filename}",
-                      dynamic_ncols=True, unit='B', unit_scale=True, unit_divisor=1024) as bar:
+        async with Download(
+                uri, filename=filename, dir=dir, session=session) as download:
+            with tqdm(
+                    total=download.size,
+                    desc=f"Downloading '{download.filename}",
+                    dynamic_ncols=True,
+                    unit='B',
+                    unit_scale=True,
+                    unit_divisor=1024) as bar:
                 output_path = download.filepath
                 async for chunk in download:
                     bar.update(len(chunk))
@@ -290,22 +347,37 @@ async def download_file(uri: str, filename: str = None, dir: str = None,
 
 async def main():
     import argparse
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('directory', nargs='?', type=str,
-                        default='.',
-                        help="directory to download the weights to")
-    parser.add_argument('-p', '--parallel', action='store_true',
-                        help="download files in parallel")
-    parser.add_argument('-s', '--segments', type=int,
-                        help="split each file into segments and download concurrently")
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        'directory',
+        nargs='?',
+        type=str,
+        default='.',
+        help="directory to download the weights to")
+    parser.add_argument(
+        '-p',
+        '--parallel',
+        action='store_true',
+        help="download files in parallel")
+    parser.add_argument(
+        '-s',
+        '--segments',
+        type=int,
+        help="split each file into segments and download concurrently")
     args = parser.parse_args()
     async with aiohttp.ClientSession() as session:
-        queue = [stream.just(download_file(uri, filename, args.directory, args.segments, session))
-                 for uri, filename in WEIGHTS.items()]
+        queue = [
+            stream.just(
+                download_file(uri, filename, args.directory, args.segments,
+                              session)) for uri, filename in WEIGHTS.items()
+        ]
         if args.parallel:
             async with stream.merge(*queue).stream() as downloads:
                 async for uri, outpath in downloads:
-                    logger.info(f"[PARALLEL] Successfully downloaded '{uri}' ({outpath})")
+                    logger.info(
+                        f"[PARALLEL] Successfully downloaded '{uri}' ({outpath})"
+                    )
         else:
             async with stream.chain(*queue).stream() as downloads:
                 async for uri, outpath in downloads:
