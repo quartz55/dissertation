@@ -8,7 +8,6 @@ import imageio
 from PIL import Image
 import numpy as np
 import lightnet as ln
-import requests
 from torch.autograd import Variable
 from torchvision import transforms
 from tqdm import tqdm
@@ -17,20 +16,6 @@ from .labels import COCO_LABELS
 
 YOLOV2_VOC_WEIGHTS_URL = "https://pjreddie.com/media/files/yolov2.weights"
 DIMENSION = [416, 416]
-
-
-def download_weights(uri: str) -> str:
-    filename = urllib.parse.urlparse(uri).path
-    filename = os.path.basename(filename)
-    filepath = os.path.join('./', filename)
-    with requests.get(uri, stream=True) as res:
-        with open(filepath, 'wb') as file:
-            with tqdm(total=int(res.headers['content-length']), desc=f"Downloading weights '{filename}'",
-                      unit='B', unit_scale=True, unit_divisor=1024) as bar:
-                for chunk in res.iter_content(chunk_size=1024):
-                    file.write(chunk)
-                    bar.update(len(chunk))
-    return filepath
 
 
 class YoloV2(ln.models.Yolo):
@@ -67,10 +52,9 @@ class YoloV2(ln.models.Yolo):
         return boxes, img, timings
 
     @classmethod
-    def pre_trained(cls, weights: str = None, labels: List[str] = COCO_LABELS,
+    def pre_trained(cls, weights: str, labels: List[str] = COCO_LABELS,
                     confidence: float = 0.25, nms: float = 0.4):
-        if weights is None:
-            weights = download_weights(YOLOV2_VOC_WEIGHTS_URL)
+        assert weights is not None, "Please provide weights"
         net = cls(num_classes=len(labels), weights_file=weights, conf_thresh=confidence, nms_thresh=nms)
         net.postprocess = transforms.Compose([
             net.postprocess,

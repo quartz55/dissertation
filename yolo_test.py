@@ -130,7 +130,7 @@ def main():
     import cProfile
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('model', type=str,
+    parser.add_argument('model', type=str, nargs='?',
                         default='yolo3', choices=['yolo2', 'yolo3'],
                         help="Model to use for detection (yolo2 or yolo3)")
     parser.add_argument('-d', '--duration', type=int,
@@ -156,3 +156,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

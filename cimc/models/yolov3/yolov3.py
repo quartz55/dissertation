@@ -1,4 +1,4 @@
-from . import darknet as d
+from . import darknet
 
 import os
 import time
@@ -14,7 +14,7 @@ YOLOV3_CFG = os.path.join(os.path.dirname(__file__), 'yolov3.cfg')
 ImageType = Union[str, np.ndarray, Image.Image]
 
 
-class YoloV3(d.Darknet):
+class YoloV3(darknet.Darknet):
     def __init__(self):
         super().__init__(YOLOV3_CFG)
 

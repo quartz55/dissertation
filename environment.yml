@@ -1,21 +1,29 @@
-name: dissertation
+name: cimc
 channels:
   - pytorch
+  - conda-forge
   - defaults
 dependencies:
   - python=3.6
   - pip
-  - matplotlib
-  - numpy
-  - pillow
-  - cuda91
   - pytorch
+  - cuda91
   - torchvision
+  - numpy
+  - numba
+  - pillow
   - pip:
+    - git+https://gitlab.com/EAVISE/brambox
+    - git+https://gitlab.com/EAVISE/lightnet
+    - aiofiles
+    - aiohttp
+    - aiostream
+    - coloredlogs
+    - tqdm
     - imageio
     - opencv-contrib-python
     - scipy
-    - sk-video
-    - tqdm
+    - scikit-learn
     - visdom
     - vispy
+    - filterpy

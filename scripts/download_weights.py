@@ -15,11 +15,11 @@ from aiostream import stream  # fades
 from tqdm import tqdm  # fades
 
 WEIGHTS = {
-    # 'https://pjreddie.com/media/files/yolov2.weights': 'yolo2.weights',
-    # 'https://pjreddie.com/media/files/yolov3.weights': 'yolo3.weights',
-    'http://ipv4.download.thinkbroadband.com/20MB.zip': '20MB.zip',
-    'http://ipv4.download.thinkbroadband.com/50MB.zip': '50MB.zip',
-    'http://ipv4.download.thinkbroadband.com/100MB.zip': '100MB.zip',
+    'https://pjreddie.com/media/files/yolov2.weights': 'yolo2.weights',
+    'https://pjreddie.com/media/files/yolov3.weights': 'yolo3.weights',
+    # 'http://ipv4.download.thinkbroadband.com/20MB.zip': '20MB.zip',
+    # 'http://ipv4.download.thinkbroadband.com/50MB.zip': '50MB.zip',
+    # 'http://ipv4.download.thinkbroadband.com/100MB.zip': '100MB.zip',
 }
 
 
