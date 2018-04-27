@@ -1,6 +1,3 @@
-import os
-import urllib.parse
-
 import time
 from typing import List
 
@@ -8,9 +5,8 @@ import imageio
 from PIL import Image
 import numpy as np
 import lightnet as ln
-from torch.autograd import Variable
+import torch
 from torchvision import transforms
-from tqdm import tqdm
 
 from .labels import COCO_LABELS
 
@@ -31,25 +27,23 @@ class YoloV2(ln.models.Yolo):
 
         height, width = img.shape[:2]
 
-        t_prepare = time.time()
+        t1 = time.time()
         pre_process = transforms.Compose([
             ln.data.Letterbox(dimension=DIMENSION),
             transforms.ToTensor()
         ])
-        tensor = pre_process(img).unsqueeze(0).cuda()
-        input_img = Variable(tensor, volatile=True)
-        t_prepare = time.time() - t_prepare
+        input_img = pre_process(img).unsqueeze(0).cuda()
+        with torch.no_grad():
+            t2 = time.time()
+            boxes = self(input_img)
+            boxes = ln.data.ReverseLetterbox.apply(boxes, DIMENSION, (width, height))
+            t3 = time.time()
 
-        t_detect = time.time()
-        boxes = self(input_img)
-        boxes = ln.data.ReverseLetterbox.apply(boxes, DIMENSION, (width, height))
-        t_detect = time.time() - t_detect
-
-        timings = {
-            'prepare': t_prepare,
-            'detect': t_detect
-        }
-        return boxes, img, timings
+            timings = {
+                'prepare': t2 - t1,
+                'detect': t3 - t2
+            }
+            return boxes, img, timings
 
     @classmethod
     def pre_trained(cls, weights: str, labels: List[str] = COCO_LABELS,

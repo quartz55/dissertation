@@ -367,7 +367,7 @@ class Darknet(nn.Module):
                 print('unknown type %s' % (block['type']))
 
     def save_weights(self, outfile, cutoff=0):
-        raise NotImplementedError
+        pass
         # if cutoff <= 0:
         #     cutoff = len(self.blocks) - 1
         #

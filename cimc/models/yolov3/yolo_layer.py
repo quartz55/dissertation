@@ -1,13 +1,14 @@
 import logging
+import math
+import time
 from typing import List
 
-from . import utils
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-import time
-import math
+
+from . import utils
 
 
 def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW, noobject_scale, object_scale,
@@ -212,6 +213,6 @@ class YoloLayer(nn.Module):
             for m in self.anchor_mask:
                 masked_anchors.append(self.anchors[m * self.anchor_step:(m + 1) * self.anchor_step])
             masked_anchors = torch.stack(masked_anchors, 0) / self.stride
-            boxes = utils.get_region_boxes_v2(output.data, self.thresh, self.num_classes, masked_anchors,
+            boxes = utils.get_region_boxes_v2(output.detach(), self.thresh, self.num_classes, masked_anchors,
                                               len(self.anchor_mask))
             return boxes

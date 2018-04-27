@@ -4,17 +4,17 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.6
-  - pip
-  - pytorch
-  - cuda91
-  - torchvision
+  - pkgs/main::python=3.6
+  - pkgs/main::pip
+  - pytorch::pytorch
+  - pytorch::cuda91
+  - pytorch::torchvision
   - numpy
   - numba
   - pillow
   - pip:
-    - git+https://gitlab.com/EAVISE/brambox
-    - git+https://gitlab.com/EAVISE/lightnet
+    - git+https://gitlab.com/EAVISE/brambox@master#egg=brambox
+    - git+https://gitlab.com/EAVISE/lightnet@master#egg=lightnet
     - aiofiles
     - aiohttp
     - aiostream

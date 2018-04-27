@@ -6,7 +6,6 @@ from PIL import Image
 from typing import Union
 import numpy as np
 import torch
-from torch.autograd import Variable
 from torchvision import transforms
 
 YOLOV3_CFG = os.path.join(os.path.dirname(__file__), 'yolov3.cfg')
@@ -36,30 +35,24 @@ class YoloV3(darknet.Darknet):
         if self.training:
             self.eval()
         t0 = time.time()
-
-        img_input = pre_process(img).unsqueeze(0)
+        img_input = pre_process(img).unsqueeze(0).to(next(self.parameters()).device)
         t1 = time.time()
 
-        if next(self.parameters()).is_cuda:
-            img_input = img_input.cuda()
-        img_input = Variable(img_input, volatile=True)
-        t2 = time.time()
+        with torch.no_grad():
+            boxes_list = self(img_input)
+            boxes = boxes_list[0][0] + boxes_list[1][0] + boxes_list[2][0]
+            t2 = time.time()
 
-        boxes_list = self(img_input)
-        boxes = boxes_list[0][0] + boxes_list[1][0] + boxes_list[2][0]
-        t3 = time.time()
+            boxes = nms(boxes, nms_thres)
+            t3 = time.time()
 
-        boxes = nms(boxes, nms_thres)
-        t4 = time.time()
-
-        timings = {
-            'pre_process': t1 - t0,
-            'cuda': t2 - t1,
-            'predict': t3 - t2,
-            'nms': t4 - t3,
-            'total': t4 - t0
-        }
-        return boxes, img, timings
+            timings = {
+                'pre_process': t1 - t0,
+                'predict': t2 - t1,
+                'nms': t3 - t2,
+                'total': t3 - t0
+            }
+            return boxes, img, timings
 
     @classmethod
     def pre_trained(cls, weights: str):
