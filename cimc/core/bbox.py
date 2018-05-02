@@ -5,7 +5,7 @@ from cimc.core.vec import Vec2
 
 
 class Point(Vec2):
-    dtype = int
+    dtype = float
 
 
 class BoundingBox:
@@ -22,10 +22,10 @@ class BoundingBox:
 
     @classmethod
     def from_yolo(cls, box: List[float], labels: List[str] = None):
-        x1 = int(box[0] - box[2] / 2)
-        y1 = int(box[1] - box[3] / 2)
-        x2 = int(box[0] + box[2] / 2)
-        y2 = int(box[1] + box[3] / 2)
+        x1 = box[0] - box[2] / 2
+        y1 = box[1] - box[3] / 2
+        x2 = box[0] + box[2] / 2
+        y2 = box[1] + box[3] / 2
         class_id = int(box[5])
         class_name = labels[class_id] if labels is not None else None
         return cls((Point(x1, y1), Point(x2, y2)), class_id, class_name, box[4].item())
@@ -54,6 +54,14 @@ class BoundingBox:
         tx, ty = self.top_left.x, self.top_left.y
         bx, by = self.bot_right.x, self.bot_right.y
         return np.array([tx, ty, bx, by, self.confidence])
+
+    def __repr__(self):
+        tx, ty = self.top_left
+        bx, by = self.bot_right
+        return f"[{self.class_id}:{self.class_name}({self.confidence * 100:.2f}%)] ({tx}, {ty}) ({bx}, {by})"
+
+    def __str__(self):
+        return self.__repr__()
 
 
 class FromYoloOutput:

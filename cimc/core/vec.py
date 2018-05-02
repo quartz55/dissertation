@@ -60,7 +60,7 @@ class Vec(metaclass=VecMeta):
 
     __slots__ = ['_data']
 
-    def __init__(self, *args: VecArgs, **kwargs: Dict[str, _dtype]) -> None:
+    def __init__(self, *args: VecArgs, **kwargs: _dtype) -> None:
         self._data = np.zeros(self._size, self._dtype)
         if len(args) > 0:
             data = args[0]
