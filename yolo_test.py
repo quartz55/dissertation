@@ -12,8 +12,12 @@ from cimc.core.bbox import BoundingBox, Point
 from cimc.core.sort import Sort
 from cimc.models.labels import COCO_LABELS
 
-font = ImageFont.truetype('resources/fonts/DejaVuSansMono.ttf', 16)
-font_bold = ImageFont.truetype('resources/fonts/DejaVuSansMono-Bold.ttf', 16)
+try:
+    font = ImageFont.truetype('resources/fonts/DejaVuSansMono.ttf', 16)
+    font_bold = ImageFont.truetype('resources/fonts/DejaVuSansMono-Bold.ttf', 16)
+except (FileNotFoundError, OSError):
+    font = ImageFont.load_default()
+    font_bold = ImageFont.load_default()
 
 device = torch.device('gpu' if torch.cuda.is_available() else 'cpu')
 
@@ -96,33 +100,6 @@ def draw_detections(image: Image.Image, bboxes: List[BoundingBox],
     return result
 
 
-def test_yolo2(duration: int):
-    from cimc.models.yolov2 import YoloV2
-
-    def detect_video(net: YoloV2, video_uri: str, out_uri: str, duration: int = None):
-        post_process = bbox.FromBramBox(COCO_LABELS)
-        from imageio.plugins.ffmpeg import FfmpegFormat
-        with imageio.get_reader(video_uri) as reader:  # type: FfmpegFormat.Reader
-            fps = reader.get_meta_data()['fps']
-            frame_stop = fps * duration if duration is not None else None
-            class_colors = make_class_labels(COCO_LABELS)
-            with imageio.get_writer(out_uri, fps=fps, quality=6) as writer:  # type: FfmpegFormat.Writer
-                with tqdm(take(reader, frame_stop or len(reader)),
-                          f"Object detection using '{net.__class__.__name__}' on '{video_uri}'",
-                          unit='frame') as bar:
-                    for index, frame in enumerate(bar):
-                        if frame_stop is not None and index >= frame_stop:
-                            break
-                        boxes, image, timings = net.detect_image(frame)
-                        boxes = [post_process(box) for box in boxes[0]]
-                        result = draw_detections(Image.fromarray(image), boxes, class_colors)
-                        writer.append_data(np.array(result))
-
-    net = YoloV2.pre_trained('resources/yolov2.weights', confidence=0.25)
-    net.cuda()
-    detect_video(net, 'resources/goldeneye.mp4', 'goldeneye-yolo2.mp4', duration)
-
-
 def test_yolo3(duration: int = None):
     from cimc.models.yolov3 import YoloV3
     from torchvision import transforms
@@ -160,9 +137,9 @@ def test_yolo3(duration: int = None):
                         result = draw_detections(image, bboxes, class_colors)
                         writer.append_data(np.array(result))
 
-    net = YoloV3.pre_trained('resources/yolov3.weights')
+    net = YoloV3.pre_trained('resources/weights/yolov3.weights')
     net.to(device)
-    detect_video(net, 'resources/toronto.mp4', 'toronto-yolo3.mp4', duration)
+    detect_video(net, 'resources/videos/ADL-Rundle-8.mp4', 'ADL-Rundle-8-yolo3.mp4', duration)
 
 
 def main():
@@ -171,7 +148,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('model', type=str, nargs='?',
-                        default='yolo3', choices=['yolo2', 'yolo3'],
+                        default='yolo3', choices=['yolo3'],
                         help="Model to use for detection (yolo2 or yolo3)")
     parser.add_argument('-d', '--duration', type=int,
                         help="Duration of the video to detect")
@@ -184,9 +161,7 @@ def main():
         prof = cProfile.Profile()
         prof.enable()
 
-    if args.model == 'yolo2':
-        test_yolo2(args.duration)
-    elif args.model == 'yolo3':
+    if args.model == 'yolo3':
         test_yolo3(args.duration)
 
     if prof is not None:
