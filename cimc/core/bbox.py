@@ -1,5 +1,6 @@
 from typing import Optional, Tuple, List
 from brambox.boxes.detections import Detection
+import numpy as np
 from cimc.core.vec import Vec2
 
 
@@ -27,7 +28,7 @@ class BoundingBox:
         y2 = int(box[1] + box[3] / 2)
         class_id = int(box[5])
         class_name = labels[class_id] if labels is not None else None
-        return cls((Point(x1, y1), Point(x2, y2)), class_id, class_name, box[4])
+        return cls((Point(x1, y1), Point(x2, y2)), class_id, class_name, box[4].item())
 
     @classmethod
     def from_brambox(cls, bbox: Detection, labels: List[str] = None):
@@ -48,6 +49,11 @@ class BoundingBox:
     @property
     def height(self) -> int:
         return self.bot_right.y - self.top_left.y
+
+    def as_tracker(self):
+        tx, ty = self.top_left.x, self.top_left.y
+        bx, by = self.bot_right.x, self.bot_right.y
+        return np.array([tx, ty, bx, by, self.confidence])
 
 
 class FromYoloOutput:

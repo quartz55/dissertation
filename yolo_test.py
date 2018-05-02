@@ -1,19 +1,44 @@
-from PIL import Image, ImageDraw, ImageFont, ImageColor
-
+import re
 from typing import List, Union, Tuple, Dict
+
 import imageio
 import numpy as np
+import torch
+from PIL import Image, ImageDraw, ImageFont, ImageColor
 from tqdm import tqdm
 
-from cimc.models.labels import COCO_LABELS
 import cimc.core.bbox as bbox
 from cimc.core.bbox import BoundingBox, Point
-import re
+from cimc.core.sort import Sort
+from cimc.models.labels import COCO_LABELS
 
-font = ImageFont.truetype('resources/DejaVuSansMono.ttf', 16)
-font_bold = ImageFont.truetype('resources/DejaVuSansMono-Bold.ttf', 16)
+font = ImageFont.truetype('resources/fonts/DejaVuSansMono.ttf', 16)
+font_bold = ImageFont.truetype('resources/fonts/DejaVuSansMono-Bold.ttf', 16)
+
+device = torch.device('gpu' if torch.cuda.is_available() else 'cpu')
 
 Color = Union[Tuple[int, int, int], Tuple[int, int, int, int]]
+
+
+def take(gen, n=1):
+    class TakeGenerator:
+        def __init__(self):
+            self.__gen = iter(gen)
+            self.__i = 1
+            self.__n = min(n, len(gen))
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self.__i > self.__n:
+                raise StopIteration
+            return next(self.__gen)
+
+        def __len__(self):
+            return self.__n
+
+    return TakeGenerator()
 
 
 class ClassLabel:
@@ -79,18 +104,19 @@ def test_yolo2(duration: int):
         from imageio.plugins.ffmpeg import FfmpegFormat
         with imageio.get_reader(video_uri) as reader:  # type: FfmpegFormat.Reader
             fps = reader.get_meta_data()['fps']
+            frame_stop = fps * duration if duration is not None else None
+            class_colors = make_class_labels(COCO_LABELS)
             with imageio.get_writer(out_uri, fps=fps, quality=6) as writer:  # type: FfmpegFormat.Writer
-                bar = tqdm(reader, f"Object detection using '{net.__class__.__name__}' on '{video_uri}'", unit='frame')
-                frames = enumerate(bar)
-                class_colors = make_class_labels(COCO_LABELS)
-                frame_stop = fps * duration if duration is not None else None
-                for index, frame in frames:
-                    if frame_stop is not None and index >= frame_stop:
-                        break
-                    boxes, image, timings = net.detect_image(frame)
-                    boxes = [post_process(box) for box in boxes[0]]
-                    result = draw_detections(Image.fromarray(image), boxes, class_colors)
-                    writer.append_data(np.array(result))
+                with tqdm(take(reader, frame_stop or len(reader)),
+                          f"Object detection using '{net.__class__.__name__}' on '{video_uri}'",
+                          unit='frame') as bar:
+                    for index, frame in enumerate(bar):
+                        if frame_stop is not None and index >= frame_stop:
+                            break
+                        boxes, image, timings = net.detect_image(frame)
+                        boxes = [post_process(box) for box in boxes[0]]
+                        result = draw_detections(Image.fromarray(image), boxes, class_colors)
+                        writer.append_data(np.array(result))
 
     net = YoloV2.pre_trained('resources/yolov2.weights', confidence=0.25)
     net.cuda()
@@ -107,22 +133,36 @@ def test_yolo3(duration: int = None):
             fps = reader.get_meta_data()['fps']
             size: Tuple[int, int] = reader.get_meta_data()['size']
             post_process = transforms.Compose([bbox.ReverseScale(*size), bbox.FromYoloOutput(COCO_LABELS)])
+            frame_stop = round(fps * duration) if duration is not None else None
             with imageio.get_writer(out_uri, fps=fps, quality=6) as writer:  # type: FfmpegFormat.Writer
-                bar = tqdm(reader, f"Object detection using '{net.__class__.__name__}' on '{video_uri}'", unit='frame')
-                frames = enumerate(bar)
-                frame_stop = fps * duration if duration is not None else None
-                class_colors = make_class_labels(COCO_LABELS)
-                for index, frame in frames:
-                    if frame_stop is not None and index >= frame_stop:
-                        break
-                    boxes, image, _timings = net.detect_image(Image.fromarray(frame))
-                    bboxes = [post_process(box) for box in boxes]
-                    result = draw_detections(image, bboxes, class_colors)
-                    writer.append_data(np.array(result))
+                with tqdm(take(reader, frame_stop or len(reader)),
+                          f"Object detection using '{net.__class__.__name__}' on '{video_uri}'",
+                          unit='frame') as bar:
+                    class_colors = make_class_labels(COCO_LABELS)
+                    trackers: Dict[int, Sort] = {}
+                    for index, frame in enumerate(bar):
+                        if frame_stop is not None and index >= frame_stop:
+                            break
+                        boxes, image, _timings = net.detect_image(Image.fromarray(frame))
+                        bboxes = [post_process(box) for box in boxes]
+                        bboxes_per_class = {}
+                        tracked_boxes = {}
+                        for box in bboxes:
+                            if box.class_id in bboxes_per_class:
+                                bboxes_per_class[box.class_id].append(box)
+                            else:
+                                bboxes_per_class[box.class_id] = [box]
+                        for class_id, bboxes in bboxes_per_class.items():
+                            if class_id not in trackers:
+                                trackers[class_id] = Sort()
+                            tracked_boxes[class_id] = trackers[class_id].update(
+                                np.array([b.as_tracker() for b in bboxes]))
+                        result = draw_detections(image, bboxes, class_colors)
+                        writer.append_data(np.array(result))
 
     net = YoloV3.pre_trained('resources/yolov3.weights')
-    net.cuda()
-    detect_video(net, 'resources/goldeneye.mp4', 'goldeneye-yolo3.mp4', duration)
+    net.to(device)
+    detect_video(net, 'resources/toronto.mp4', 'toronto-yolo3.mp4', duration)
 
 
 def main():
@@ -156,4 +196,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
