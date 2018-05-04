@@ -9,7 +9,8 @@ class Point(Vec2):
 
 
 class BoundingBox:
-    __slots__ = ['top_left', 'bot_right', 'class_id', 'class_name', 'confidence']
+    __slots__ = ['top_left', 'bot_right',
+                 'class_id', 'class_name', 'confidence']
 
     def __init__(self, box: Tuple[Point, Point],
                  class_id: int = -1, name: str = None,
@@ -50,15 +51,15 @@ class BoundingBox:
     def height(self) -> int:
         return self.bot_right.y - self.top_left.y
 
-    def as_tracker(self):
+    def as_numpy(self):
         tx, ty = self.top_left.x, self.top_left.y
         bx, by = self.bot_right.x, self.bot_right.y
-        return np.array([tx, ty, bx, by, self.confidence])
+        return np.array([tx, ty, bx, by, self.confidence, self.class_id])
 
     def __repr__(self):
         tx, ty = self.top_left
         bx, by = self.bot_right
-        return f"[{self.class_id}:{self.class_name}({self.confidence * 100:.2f}%)] ({tx}, {ty}) ({bx}, {by})"
+        return f"[{self.class_id}:{self.class_name}({self.confidence * 100:.2f}%)] ({tx:.2f}, {ty:.2f}) ({bx:.2f}, {by:.2f})"
 
     def __str__(self):
         return self.__repr__()
