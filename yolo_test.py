@@ -1,23 +1,25 @@
-import re
-from typing import List, Union, Tuple, Dict, Any
-
-from cimc.models.yolov3 import YoloV3
-from torchvision import transforms
 import os.path
 import pickle
+import re
+from typing import List, Union, Tuple, Dict
+
 import imageio
 import numpy as np
 import torch
 from PIL import Image, ImageDraw, ImageFont, ImageColor
+from torchvision import transforms
 from tqdm import tqdm
 
 import cimc.core.bbox as bbox
 from cimc.core.bbox import BoundingBox, Point
 from cimc.core.sort import Sort
 from cimc.models.labels import COCO_LABELS
+from cimc.models.yolov3 import YoloV3
+
 
 class Resources:
     root = 'resources'
+
     @staticmethod
     def font(name: str) -> str:
         return os.path.join(Resources.root, 'fonts', name)
@@ -29,6 +31,7 @@ class Resources:
     @staticmethod
     def weights(name: str) -> str:
         return os.path.join(Resources.root, 'weights', name)
+
 
 try:
     font = ImageFont.truetype(Resources.font('DejaVuSansMono.ttf'), 14)
@@ -118,7 +121,7 @@ def draw_detections(image: Image.Image, bboxes: List[BoundingBox],
             top_left = Point.max(
                 top_left - Point(y=text_h + pad * 2 - thick), Point(0, 0))
             bot_right = top_left + \
-                Point(x=text_w + 2 * pad, y=text_h + 2 * pad)
+                        Point(x=text_w + 2 * pad, y=text_h + 2 * pad)
             draw.rectangle([tuple(top_left),
                             tuple(bot_right)],
                            fill=label.color)
@@ -159,7 +162,7 @@ def draw_tracked(image: Image.Image, bboxes: np.ndarray,
             top_left = Point.max(
                 top_left - Point(y=text_h + pad * 2 - thick), Point(0, 0))
             bot_right = top_left + \
-                Point(x=text_w + 2 * pad, y=text_h + 2 * pad)
+                        Point(x=text_w + 2 * pad, y=text_h + 2 * pad)
             draw.rectangle([tuple(top_left),
                             tuple(bot_right)],
                            fill=label.color)
@@ -170,7 +173,6 @@ def draw_tracked(image: Image.Image, bboxes: np.ndarray,
 
 def test_yolo3(duration: int = None):
     def detect_video(net: YoloV3, video_uri: str, out_uri: str, duration: int = None):
-        from imageio.plugins.ffmpeg import FfmpegFormat
         with imageio.get_reader(video_uri) as reader:
             fps = reader.get_meta_data()['fps']
             size: Tuple[int, int] = reader.get_meta_data()['size']
@@ -262,3 +264,26 @@ class VideoDetections:
     def load(path: str):
         with open(path, 'rb') as file:
             return pickle.load(file)
+
+
+def test_detection():
+    v = VideoDetections(Resources.video('ADL-Rundle-8.mp4'))
+    v.run()
+    v.save()
+
+def test_tracking():
+    from cimc.core.tracker import Tracker
+    detections: VideoDetections = VideoDetections.load(Resources.video('ADL-Rundle-8.dets'))
+    with imageio.get_reader(detections.video_uri) as video:
+        fps = video.get_meta_data()['fps']
+        with imageio.get_writer('test-tracking.mp4', fps=fps, quality=6) as writer:
+            with tqdm(video,
+                      f"Tracking detections of '{detections.video_uri}'",
+                      unit='frame',
+                      dynamic_ncols=True) as video:
+                class_colors = make_class_labels(COCO_LABELS)
+                tracker = Tracker(fps, iou_thres=0.2)
+                for frame, bboxes in zip(video, detections.detections):
+                    tracker.update(bboxes)
+
+test_detection()
