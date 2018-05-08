@@ -1,5 +1,6 @@
 from typing import List, Tuple
 
+import attr
 import numpy as np
 from filterpy.kalman import KalmanFilter
 from sklearn.utils.linear_assignment_ import linear_assignment
@@ -28,6 +29,10 @@ def convert_bbox_to_z(bbox: BoundingBox):
     s = w * h
     r = w / h
     return np.array([x, y, s, r]).reshape((4, 1))
+
+
+class InvalidPrediction(Exception):
+    pass
 
 
 class KalmanBoxTracker:
@@ -95,6 +100,9 @@ class KalmanBoxTracker:
         if (self.kf.x[6] + self.kf.x[2]) <= 0:
             self.kf.x[6] *= 0.0
         self.kf.predict()
+        if np.isnan(np.dot(self.kf.x, self.kf.x)):
+            raise InvalidPrediction
+
         self.age += 1
         if self.time_since_update > 0:
             self.hit_streak = 0
@@ -111,6 +119,13 @@ class KalmanBoxTracker:
         self.hits += 1
         self.hit_streak += 1
         self.kf.update(convert_bbox_to_z(bbox))
+
+
+@attr.s(slots=True)
+class Matches:
+    matches = attr.ib(factory=attr.Factory(list))
+    new_matches = attr.ib(factory=attr.Factory(list))
+    no_matches = attr.ib(factory=attr.Factory(list))
 
 
 class Tracker:
@@ -132,27 +147,21 @@ class Tracker:
             return np.empty((0, 2), dtype=int), np.arange(len(bboxes)), np.empty((0, 5), dtype=int)
 
         # Build IoU matrix between measured and predicted bboxes
-        iou_matrix = np.zeros((len(bboxes), len(self.trackers)), dtype=np.float32)
-        for d, det in enumerate(bboxes):
-            for t, trk in enumerate(self.trackers):
-                iou_matrix[d, t] = det.iou(trk.bbox())
-        matched_indices = linear_assignment(-iou_matrix)
+        iou_matrix = np.zeros((len(bboxes), len(self.trackers)),
+                              dtype=np.float32)
+        for d, bbox in enumerate(bboxes):
+            for t, tracker in enumerate(self.trackers):
+                iou_matrix[d, t] = bbox.iou(tracker.bbox())
+        matches_idx = linear_assignment(-iou_matrix)
 
-        unmatched_detections = []
-        for d, det in enumerate(bboxes):
-            if d not in matched_indices[:, 0]:
-                unmatched_detections.append(d)
-
-        unmatched_trackers = []
-        for t, trk in enumerate(self.trackers):
-            if t not in matched_indices[:, 1]:
-                unmatched_trackers.append(t)
+        new_matches = [d for d, det in enumerate(bboxes) if d not in matches_idx[: 0]]
+        no_matches = [t for t, tracker in enumerate(self.trackers) if t not in matches_idx[: 1]]
 
         matches = []
-        for m in matched_indices:
+        for m in matches_idx:
             if iou_matrix[m[0], m[1]] < self.iou_thres:
-                unmatched_detections.append(m[0])
-                unmatched_trackers.append(m[1])
+                new_matches.append(m[0])
+                no_matches.append(m[1])
             else:
                 matches.append(m.reshape(1, 2))
         if len(matches) == 0:
@@ -160,25 +169,29 @@ class Tracker:
         else:
             matches = np.concatenate(matches, axis=0)
 
-        return matches, np.array(unmatched_detections), np.array(unmatched_trackers)
+        return Matches(matches, np.array(new_matches), np.array(no_matches))
 
     def update(self, bboxes):
         self.curr_frame += 1
 
         # Kalman Filter predict step
-        predictions = [t.predict() for t in self.trackers]
+        for i, tracker in reversed(list(enumerate(self.trackers))):
+            try:
+                tracker.predict()
+            except InvalidPrediction:
+                self.trackers.pop(i)
 
         # Match predicted bboxes to measured bboxes using IoU
-        matched, unmatched_dets, unmatched_trks = self._match_trackers(bboxes)
+        mr = self._match_trackers(bboxes)
 
         # Kalman Filter update step
         for t, trk in enumerate(self.trackers):
-            if t not in unmatched_trks:
-                d = matched[np.where(matched[:, 1] == t)[0], 0]
+            if t not in mr.no_matches:
+                d = mr.matches[np.where(mr.matches[:, 1] == t)[0], 0]
                 trk.update(bboxes[d, :][0])
 
         # Start tracking unmatched bboxes
-        for i in unmatched_dets:
+        for i in mr.no_matches:
             trk = KalmanBoxTracker(bboxes[i])
             self.trackers.append(trk)
 
@@ -188,9 +201,20 @@ class Tracker:
             d = trk.bbox()
             if (trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.curr_frame <= self.min_hits):
                 ret.append(np.concatenate((d, [trk.id + 1])).reshape(1, -1))
-            # remove dead tracklet
             if trk.time_since_update > self.max_age:
                 self.trackers.pop(i)
         if len(ret) > 0:
             return np.concatenate(ret)
         return np.empty((0, 5))
+
+
+class MultiTracker:
+    def __init__(self):
+        self.trackers = {}
+
+    def update(self, bboxes):
+        for bbox in bboxes:
+            if bbox.class_id not in self.trackers:
+                self.trackers[bbox.class_id].append(bbox)
+            else:
+                self.trackers[bbox.class_id] = [bbox]
