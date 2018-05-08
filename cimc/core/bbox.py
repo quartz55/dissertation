@@ -68,7 +68,7 @@ class BoundingBox:
 
     @property
     def class_id(self) -> int:
-        return int(self._data[4])
+        return int(self._data[5])
 
     @class_id.setter
     def class_id(self, value):

@@ -9,10 +9,12 @@ import torch
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from torchvision import transforms
 from tqdm import tqdm
+import functools as f
+import operator as op
 
 import cimc.core.bbox as bbox
 from cimc.core.bbox import BoundingBox, Point
-from cimc.core.sort import Sort
+from cimc.core.tracker import TrackedBoundingBox, Tracker, MultiTracker
 from cimc.models.labels import COCO_LABELS
 from cimc.models.yolov3 import YoloV3
 
@@ -130,20 +132,20 @@ def draw_detections(image: Image.Image, bboxes: List[BoundingBox],
     return result
 
 
-def draw_tracked(image: Image.Image, bboxes: np.ndarray,
+def draw_tracked(image: Image.Image, tracked: List[TrackedBoundingBox],
                  class_colors: Dict[int, ClassLabel] = None) -> Image.Image:
-    if len(bboxes) == 0:
+    if len(tracked) == 0:
         return image
     if class_colors is None:
         class_colors = {}
+    w, h = image.width, image.height
     result = image.copy()
     draw = ImageDraw.Draw(result)
-    for box in bboxes:
-        label = class_colors.get(box[5], ClassLabel(color=(32, 32, 32)))
+    for box in tracked:
+        label = class_colors.get(box.class_id, ClassLabel(color=(32, 32, 32)))
         thick = 2
-        top_left = Point.max(Point(box[0], box[1]), Point(0, 0))
-        bot_right = Point.min(Point(box[2], box[3]), Point(
-            image.width - 1, image.height - 1))
+        top_left = Point.max(box.top_left, Point(0, 0))
+        bot_right = Point.min(box.bot_right, Point(w - 1, h - 1))
         top_right = Point(bot_right.x, top_left.y)
         bot_left = Point(top_left.x, bot_right.y)
         # Draw rectangle outline manually
@@ -157,7 +159,7 @@ def draw_tracked(image: Image.Image, bboxes: np.ndarray,
             bot_left + Point(x=thick))], fill=label.color)
         if label.name is not None:
             pad = 3
-            text = f"{label.name}({int(box[4])})"
+            text = f"{label.name} {box.tracking_id}({box.confidence:.0f})"
             text_w, text_h = font.getsize(text)
             top_left = Point.max(
                 top_left - Point(y=text_h + pad * 2 - thick), Point(0, 0))
@@ -169,52 +171,6 @@ def draw_tracked(image: Image.Image, bboxes: np.ndarray,
             draw.text(tuple(top_left + Point(pad, pad)),
                       text, fill='white', font=font_bold)
     return result
-
-
-def test_yolo3(duration: int = None):
-    def detect_video(net: YoloV3, video_uri: str, out_uri: str, duration: int = None):
-        with imageio.get_reader(video_uri) as reader:
-            fps = reader.get_meta_data()['fps']
-            size: Tuple[int, int] = reader.get_meta_data()['size']
-            post_process = transforms.Compose(
-                [bbox.ReverseScale(*size), bbox.FromYoloOutput(COCO_LABELS)])
-            frame_stop = round(
-                fps * duration) if duration is not None else None
-            with imageio.get_writer(out_uri, fps=fps, quality=6) as writer:
-                with tqdm(take(reader, frame_stop or len(reader)),
-                          f"Object detection using '{net.__class__.__name__}' on '{video_uri}'",
-                          unit='frame',
-                          dynamic_ncols=True) as bar:
-                    class_colors = make_class_labels(COCO_LABELS)
-                    trackers: Dict[int, Sort] = {}
-                    for _index, frame in enumerate(bar):
-                        boxes, image, _timings = net.detect_image(
-                            Image.fromarray(frame))
-                        bboxes = [post_process(box) for box in boxes]
-                        bboxes_per_class = {}
-                        tracked = {}
-                        for box in bboxes:
-                            if box.class_id in bboxes_per_class:
-                                bboxes_per_class[box.class_id].append(box)
-                            else:
-                                bboxes_per_class[box.class_id] = [box]
-                        for id, bb in bboxes_per_class.items():
-                            if id not in trackers:
-                                trackers[id] = Sort(
-                                    max_age=int(fps), iou_thres=0.1)
-                            tracked[id] = trackers[id].update(
-                                np.array([b.as_tracker() for b in bb]))[::-1]
-                        # result = draw_detections(image, bboxes, class_colors)
-                        tracked_list = np.concatenate(
-                            [np.c_[box, np.full((len(box),), id)] for id, box in tracked.items()])
-                        result = draw_tracked(
-                            image, tracked_list, class_colors)
-                        writer.append_data(np.array(result))
-
-    net = YoloV3.pre_trained(Resources.weights('yolov3.weights'))
-    net.to(device)
-    detect_video(net, Resources.video('ADL-Rundle-8.mp4'),
-                 'ADL-Rundle-8-yolo3.mp4', duration)
 
 
 class VideoDetections:
@@ -266,13 +222,13 @@ class VideoDetections:
             return pickle.load(file)
 
 
-def test_detection():
-    v = VideoDetections(Resources.video('ADL-Rundle-8.mp4'))
+def gen_detections(video_file: str):
+    v = VideoDetections(video_file)
     v.run()
     v.save()
 
+
 def test_tracking():
-    from cimc.core.tracker import Tracker
     detections: VideoDetections = VideoDetections.load(Resources.video('ADL-Rundle-8.dets'))
     with imageio.get_reader(detections.video_uri) as video:
         fps = video.get_meta_data()['fps']
@@ -282,8 +238,15 @@ def test_tracking():
                       unit='frame',
                       dynamic_ncols=True) as video:
                 class_colors = make_class_labels(COCO_LABELS)
-                tracker = Tracker(fps, iou_thres=0.2)
+                tracker = MultiTracker(int(fps), iou_thres=0.2)
                 for frame, bboxes in zip(video, detections.detections):
-                    tracker.update(bboxes)
+                    tracked_objects = tracker.update(bboxes)
+                    tracked_objects = f.reduce(op.concat, tracked_objects.values())
+                    result = draw_tracked(Image.fromarray(frame), tracked_objects, class_colors)
+                    writer.append_data(np.array(result))
+                    pass
 
-test_detection()
+
+if __name__ == '__main__':
+    # gen_detections(Resources.video('ADL-Rundle-8.mp4'))
+    test_tracking()

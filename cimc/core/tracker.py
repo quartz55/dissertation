@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 import attr
 import numpy as np
@@ -15,6 +15,15 @@ class TrackedBoundingBox(BoundingBox):
                  tracking_id: int = -1):
         super().__init__(box, class_id, name, confidence)
         self.tracking_id = tracking_id
+
+    @classmethod
+    def from_bbox(cls, bbox: BoundingBox, tracking_id: int = -1):
+        return cls((bbox.top_left, bbox.bot_right),
+                   bbox.class_id, bbox.class_name,
+                   bbox.confidence, tracking_id)
+
+    def __repr__(self):
+        return f"({self.tracking_id})" + super().__repr__()
 
 
 def convert_bbox_to_z(bbox: BoundingBox):
@@ -100,7 +109,7 @@ class KalmanBoxTracker:
         if (self.kf.x[6] + self.kf.x[2]) <= 0:
             self.kf.x[6] *= 0.0
         self.kf.predict()
-        if np.isnan(np.dot(self.kf.x, self.kf.x)):
+        if np.isnan(self.kf.x).any():
             raise InvalidPrediction
 
         self.age += 1
@@ -123,9 +132,9 @@ class KalmanBoxTracker:
 
 @attr.s(slots=True)
 class Matches:
-    matches = attr.ib(factory=attr.Factory(list))
-    new_matches = attr.ib(factory=attr.Factory(list))
-    no_matches = attr.ib(factory=attr.Factory(list))
+    matches: np.ndarray = attr.ib(factory=lambda: np.empty((0, 2), dtype=int))
+    new_matches: np.ndarray = attr.ib(factory=lambda: np.empty(0, dtype=int))
+    no_matches: np.ndarray = attr.ib(factory=lambda: np.empty(0, dtype=int))
 
 
 class Tracker:
@@ -144,7 +153,7 @@ class Tracker:
         :return: (matched, unmatched_dets, unmatched_trackers)
         """
         if len(self.trackers) == 0:
-            return np.empty((0, 2), dtype=int), np.arange(len(bboxes)), np.empty((0, 5), dtype=int)
+            return Matches(new_matches=np.arange(len(bboxes)))
 
         # Build IoU matrix between measured and predicted bboxes
         iou_matrix = np.zeros((len(bboxes), len(self.trackers)),
@@ -154,8 +163,8 @@ class Tracker:
                 iou_matrix[d, t] = bbox.iou(tracker.bbox())
         matches_idx = linear_assignment(-iou_matrix)
 
-        new_matches = [d for d, det in enumerate(bboxes) if d not in matches_idx[: 0]]
-        no_matches = [t for t, tracker in enumerate(self.trackers) if t not in matches_idx[: 1]]
+        new_matches = [d for d, det in enumerate(bboxes) if d not in matches_idx[:, 0]]
+        no_matches = [t for t, tracker in enumerate(self.trackers) if t not in matches_idx[:, 1]]
 
         matches = []
         for m in matches_idx:
@@ -185,36 +194,44 @@ class Tracker:
         mr = self._match_trackers(bboxes)
 
         # Kalman Filter update step
-        for t, trk in enumerate(self.trackers):
+        for t, tracker in enumerate(self.trackers):
             if t not in mr.no_matches:
                 d = mr.matches[np.where(mr.matches[:, 1] == t)[0], 0]
-                trk.update(bboxes[d, :][0])
+                tracker.update(bboxes[d[0]])
 
         # Start tracking unmatched bboxes
-        for i in mr.no_matches:
-            trk = KalmanBoxTracker(bboxes[i])
-            self.trackers.append(trk)
+        for i in mr.new_matches:
+            self.trackers.append(KalmanBoxTracker(bboxes[i]))
 
         # Cleanup zombie trackers
         ret = []
-        for i, trk in reversed(list(enumerate(self.trackers))):
-            d = trk.bbox()
-            if (trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.curr_frame <= self.min_hits):
-                ret.append(np.concatenate((d, [trk.id + 1])).reshape(1, -1))
-            if trk.time_since_update > self.max_age:
+        for i, tracker in reversed(list(enumerate(self.trackers))):
+            if tracker.time_since_update > self.max_age:
                 self.trackers.pop(i)
-        if len(ret) > 0:
-            return np.concatenate(ret)
-        return np.empty((0, 5))
+            # elif tracker.hit_streak >= self.min_hits or self.curr_frame <= self.min_hits:
+            #     ret.append(TrackedBoundingBox.from_bbox(tracker.bbox(), tracker.id))
+            ret.append(TrackedBoundingBox.from_bbox(tracker.bbox(), tracker.id))
+        return ret
 
 
 class MultiTracker:
-    def __init__(self):
-        self.trackers = {}
+    def __init__(self, max_age=1, min_hits=3, iou_thres=0.3):
+        self.max_age = max_age
+        self.min_hits = min_hits
+        self.iou_thres = iou_thres
+        self.trackers: Dict[int, Tracker] = {}
 
     def update(self, bboxes):
+        per_class = {}
         for bbox in bboxes:
-            if bbox.class_id not in self.trackers:
-                self.trackers[bbox.class_id].append(bbox)
+            if bbox.class_id in per_class:
+                per_class[bbox.class_id].append(bbox)
             else:
-                self.trackers[bbox.class_id] = [bbox]
+                per_class[bbox.class_id] = [bbox]
+
+        tracked = {}
+        for cls, bbs in per_class.items():
+            if cls not in self.trackers:
+                self.trackers[cls] = Tracker(self.max_age, self.min_hits, self.iou_thres)
+            tracked[cls] = self.trackers[cls].update(bbs)
+        return tracked
