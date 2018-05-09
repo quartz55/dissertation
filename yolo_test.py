@@ -229,6 +229,7 @@ def gen_detections(video_file: str):
 
 
 def test_tracking():
+    import time
     detections: VideoDetections = VideoDetections.load(Resources.video('ADL-Rundle-8.dets'))
     with imageio.get_reader(detections.video_uri) as video:
         fps = video.get_meta_data()['fps']
@@ -239,12 +240,16 @@ def test_tracking():
                       dynamic_ncols=True) as video:
                 class_colors = make_class_labels(COCO_LABELS)
                 tracker = MultiTracker(int(fps), iou_thres=0.2)
-                for frame, bboxes in zip(video, detections.detections):
+                timings = np.empty(len(video))
+                for frame, bboxes in zip(enumerate(video), detections.detections):
+                    idx, frame = frame
                     tracked_objects = tracker.update(bboxes)
                     tracked_objects = f.reduce(op.concat, tracked_objects.values())
+                    t = time.time()
                     result = draw_tracked(Image.fromarray(frame), tracked_objects, class_colors)
+                    timings[idx] = time.time() - t
                     writer.append_data(np.array(result))
-                    pass
+                print(f"Average tracking time: {np.mean(timings)}")
 
 
 if __name__ == '__main__':

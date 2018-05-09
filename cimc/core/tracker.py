@@ -65,7 +65,7 @@ class KalmanBoxTracker:
                               [0, 0, 0, 1, 0, 0, 0]])
 
         self.kf.R[2:, 2:] *= 10.
-        self.kf.P[4:, 4:] *= 1000.  # give high uncertainty to the unobservable initial velocities
+        self.kf.P[4:, 4:] *= 100.  # give high uncertainty to the unobservable initial velocities
         self.kf.P *= 10.
         self.kf.Q[-1, -1] *= 0.01
         self.kf.Q[4:, 4:] *= 0.01
@@ -208,9 +208,11 @@ class Tracker:
         for i, tracker in reversed(list(enumerate(self.trackers))):
             if tracker.time_since_update > self.max_age:
                 self.trackers.pop(i)
+                continue
             # elif tracker.hit_streak >= self.min_hits or self.curr_frame <= self.min_hits:
             #     ret.append(TrackedBoundingBox.from_bbox(tracker.bbox(), tracker.id))
-            ret.append(TrackedBoundingBox.from_bbox(tracker.bbox(), tracker.id))
+            if tracker.hits >= self.min_hits:
+                ret.append(TrackedBoundingBox.from_bbox(tracker.bbox(), tracker.id))
         return ret
 
 
@@ -222,7 +224,7 @@ class MultiTracker:
         self.trackers: Dict[int, Tracker] = {}
 
     def update(self, bboxes):
-        per_class = {}
+        per_class = {cls: [] for cls in self.trackers}
         for bbox in bboxes:
             if bbox.class_id in per_class:
                 per_class[bbox.class_id].append(bbox)
