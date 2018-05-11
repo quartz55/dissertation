@@ -1,7 +1,6 @@
 name: cimc
 channels:
   - pytorch
-  - conda-forge
   - defaults
 dependencies:
   - pkgs/main::python=3.6
@@ -11,8 +10,9 @@ dependencies:
   - pytorch::torchvision
   - numpy
   - numba
-  - pillow
+  - conda-forge::av
   - pip:
+    - git+https://github.com/Breakthrough/PySceneDetect@master#egg=PySceneDetect
     - git+https://gitlab.com/EAVISE/brambox@master#egg=brambox
     - git+https://gitlab.com/EAVISE/lightnet@master#egg=lightnet
     - aiofiles
@@ -20,6 +20,7 @@ dependencies:
     - aiostream
     - coloredlogs
     - tqdm
+    - pillow
     - imageio
     - opencv-contrib-python
     - scipy

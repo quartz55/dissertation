@@ -36,8 +36,8 @@ class Resources:
 
 
 try:
-    font = ImageFont.truetype(Resources.font('DejaVuSansMono.ttf'), 14)
-    font_bold = ImageFont.truetype(Resources.font('DejaVuSansMono-Bold.ttf'), 14)
+    font = ImageFont.truetype(Resources.font('DejaVuSansMono.ttf'), 10)
+    font_bold = ImageFont.truetype(Resources.font('DejaVuSansMono-Bold.ttf'), 10)
 except (FileNotFoundError, OSError):
     font = ImageFont.load_default()
     font_bold = ImageFont.load_default()
@@ -158,8 +158,8 @@ def draw_tracked(image: Image.Image, tracked: List[TrackedBoundingBox],
         draw.rectangle([tuple(top_left), tuple(
             bot_left + Point(x=thick))], fill=label.color)
         if label.name is not None:
-            pad = 3
-            text = f"{label.name} {box.tracking_id}({box.confidence:.0f})"
+            pad = 2
+            text = f"{label.name}{box.tracking_id}"
             text_w, text_h = font.getsize(text)
             top_left = Point.max(
                 top_left - Point(y=text_h + pad * 2 - thick), Point(0, 0))
@@ -228,12 +228,14 @@ def gen_detections(video_file: str):
     v.save()
 
 
-def test_tracking():
+def test_tracking(dets_file: str):
     import time
-    detections: VideoDetections = VideoDetections.load(Resources.video('ADL-Rundle-8.dets'))
+    detections: VideoDetections = VideoDetections.load(dets_file)
+    video_name = os.path.splitext(detections.video_uri)[0]
+    video_name += "-tracked.mp4"
     with imageio.get_reader(detections.video_uri) as video:
         fps = video.get_meta_data()['fps']
-        with imageio.get_writer('test-tracking.mp4', fps=fps, quality=6) as writer:
+        with imageio.get_writer(video_name, fps=fps, quality=6) as writer:
             with tqdm(video,
                       f"Tracking detections of '{detections.video_uri}'",
                       unit='frame',
@@ -243,15 +245,26 @@ def test_tracking():
                 timings = np.empty(len(video))
                 for frame, bboxes in zip(enumerate(video), detections.detections):
                     idx, frame = frame
+                    t = time.time()
                     tracked_objects = tracker.update(bboxes)
                     tracked_objects = f.reduce(op.concat, tracked_objects.values())
-                    t = time.time()
-                    result = draw_tracked(Image.fromarray(frame), tracked_objects, class_colors)
                     timings[idx] = time.time() - t
+                    result = draw_tracked(Image.fromarray(frame), tracked_objects, class_colors)
                     writer.append_data(np.array(result))
-                print(f"Average tracking time: {np.mean(timings)}")
+                mean = np.mean(timings)
+                print(f"Average tracking time: {mean}s | {mean*1000}ms | {1/mean}fps")
 
 
 if __name__ == '__main__':
-    # gen_detections(Resources.video('ADL-Rundle-8.mp4'))
-    test_tracking()
+    import cProfile
+    # gen_detections(Resources.video('TUD-Campus.mp4'))
+    # gen_detections(Resources.video('TUD-Crossing.mp4'))
+    # gen_detections(Resources.video('Venice-1.mp4'))
+    # test_tracking(Resources.video('TUD-Campus.dets'))
+    # test_tracking(Resources.video('TUD-Crossing.dets'))
+    # test_tracking(Resources.video('Venice-1.dets'))
+    # pr = cProfile.Profile()
+    # pr.enable()
+    # test_tracking()
+    # pr.disable()
+    # pr.dump_stats('tracking.pstats')
