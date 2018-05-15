@@ -2,30 +2,20 @@ from . import darknet
 
 import os
 import time
-from PIL import Image
-from typing import Union
-import numpy as np
 import torch
 from torchvision import transforms
 
-YOLOV3_CFG = os.path.join(os.path.dirname(__file__), 'yolov3.cfg')
+import cimc.utils as utils
 
-ImageType = Union[str, np.ndarray, Image.Image]
+YOLOV3_CFG = os.path.join(os.path.dirname(__file__), 'yolov3.cfg')
 
 
 class YoloV3(darknet.Darknet):
     def __init__(self):
         super().__init__(YOLOV3_CFG)
 
-    def detect_image(self, image: ImageType, confidence=0.25, nms_thres=0.4):
-        if isinstance(image, Image.Image):
-            img = image
-        elif isinstance(image, str):
-            img = Image.open(image).convert('RGB')
-        elif isinstance(image, np.ndarray):
-            img = Image.fromarray(image, 'RGB')
-        else:
-            raise TypeError(f"image must be of type {ImageType}")
+    def detect_image(self, image: utils.ImageType, confidence=0.25, nms_thres=0.4):
+        img = utils.to_image(image)
 
         pre_process = transforms.Compose([
             transforms.Resize((self.height, self.width)),

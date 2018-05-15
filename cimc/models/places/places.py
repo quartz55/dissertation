@@ -1,14 +1,48 @@
-import os
+import functools as f
+import time
+from enum import Enum
+from typing import List, Dict
 
-import cv2
+import attr
 import numpy as np
 import torch
-from PIL import Image
 from scipy.misc import imresize as imresize
 from torch.nn import functional as F
 from torchvision import transforms as tf
 
+import cimc.utils as utils
 from .labels import load_labels
+from .wideresnet import ResNet, BasicBlock
+
+
+class SceneType(Enum):
+    INDOOR = 'indoor'
+    OUTDOOR = 'outdoor'
+
+
+@attr.s(slots=True)
+class CategoryPrediction:
+    name: str = attr.ib()
+    confidence: float = attr.ib()
+
+
+@attr.s(slots=True, str=False)
+class SceneClassification:
+    type: SceneType = attr.ib()
+    categories: List[CategoryPrediction] = attr.ib(factory=list)
+    attributes: List[str] = attr.ib(factory=list)
+    timings: Dict[str, float] = attr.ib(factory=dict)
+
+    def __str__(self):
+        tmp = f"┌─SCENE CLASSIFICATION\n" \
+              f"├─TYPE: {self.type.value}\n" \
+              f"{'├' if len(self.attributes) > 0 else '└'}─CATEGORIES:\n"
+        for cat in self.categories:
+            tmp += f"│   {cat.name}({cat.confidence*100:.2f}%)\n"
+        if len(self.attributes) > 0:
+            tmp += f"└─ATTRIBUTES:\n" \
+                   f"    {', '.join(sorted(self.attributes))}"
+        return tmp
 
 
 def returnCAM(feature_conv, weight_softmax, class_idx):
@@ -26,86 +60,85 @@ def returnCAM(feature_conv, weight_softmax, class_idx):
     return output_cam
 
 
-def load_model():
-    # this model has a last conv feature map as 14x14
+class Places365(ResNet):
+    def __init__(self):
+        super().__init__(BasicBlock, [2, 2, 2, 2], num_classes=365)
+        self.pre_process = tf.Compose([
+            tf.Resize((224, 224)),
+            tf.ToTensor(),
+            tf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        classes, io_labels, attr_labels, attr_weights = load_labels()
+        self.classes = classes
+        self.io_labels = io_labels
+        self.attr_labels = attr_labels
+        self.attr_weights = attr_weights
 
-    model_file = 'wideresnet18_places365.pth.tar'
-    if not os.access(model_file, os.W_OK):
-        os.system('wget http://places2.csail.mit.edu/models_places365/' + model_file)
-        os.system('wget https://raw.githubusercontent.com/csailvision/places365/master/wideresnet.py')
+    def classify(self, image: utils.ImageType) -> SceneClassification:
+        img = utils.to_image(image)
 
-    from . import wideresnet
-    model = wideresnet.resnet18(num_classes=365)
-    checkpoint = torch.load(model_file, map_location=lambda storage, loc: storage)
-    state_dict = {str.replace(k, 'module.', ''): v for k, v in checkpoint['state_dict'].items()}
-    model.load_state_dict(state_dict)
-    model.eval()
+        if self.training:
+            self.eval()
 
-    model.eval()
+        features = {}
+        hooks = {}
 
-    # hook the feature extractor
-    features_blobs = []
+        def hook(name, _m, _i, o):
+            features[name] = np.squeeze(o.detach().numpy())
 
-    def hook_feature(_module, _input, output):
-        features_blobs.append(np.squeeze(output.data.cpu().numpy()))
+        hooks['layer4'] = self.layer4.register_forward_hook(f.partial(hook, 'layer4'))
+        hooks['avgpool'] = self.layer4.register_forward_hook(f.partial(hook, 'avgpool'))
 
-    features_names = ['layer4', 'avgpool']  # this is the last conv layer of the resnet
-    for name in features_names:
-        # noinspection PyProtectedMember
-        model._modules.get(name).register_forward_hook(hook_feature)
-    return model, features_blobs
+        # get the softmax weight
+        params = list(self.parameters())
+        weight_softmax = params[-2].data.numpy()
+        weight_softmax[weight_softmax < 0] = 0
+        t1 = time.time()
+        img_input = self.pre_process(img).unsqueeze(0).to(next(self.parameters()).device)
+
+        with torch.no_grad():
+            t2 = time.time()
+            logit = self(img_input)
+            t3 = time.time()
+
+            h_x = F.softmax(logit, 1).data.squeeze()
+            probs, idx = h_x.sort(0, True)
+            probs, idx = probs.numpy(), idx.numpy()
+
+            io_image = np.mean(self.io_labels[idx[:10]])  # vote for the indoor or outdoor
+            responses_attribute = self.attr_weights.dot(features['avgpool'])
+            idx_a = np.argsort(responses_attribute)
+            t4 = time.time()
+
+            env_type = SceneType.INDOOR if io_image < 0.5 else SceneType.OUTDOOR
+            cats = [CategoryPrediction(cls, prob) for prob, cls in zip(probs[:5], self.classes[idx[:5]])]
+            attrs = list(self.attr_labels[idx_a[-1:-10:-1]])
+            t5 = time.time()
+            timings = {
+                'pre_process': t2 - t1,
+                'forward_pass': t3 - t2,
+                'result_prep': t4 - t3,
+                'result_creation': t5 - t4
+            }
+            result = SceneClassification(env_type, cats, attrs, timings)
+            for h in hooks.values():
+                h.remove()
+            return result
+
+    @classmethod
+    def from_model(cls, model_file: str):
+        m = cls()
+        checkpoint = torch.load(model_file, map_location=lambda st, loc: st)
+        state_dict = {str.replace(k, 'module.', ''): v
+                      for k, v in checkpoint['state_dict'].items()}
+        m.load_state_dict(state_dict)
+        return m
 
 
 def main():
-    # load the labels
-    classes, io_labels, attr_labels, attr_weights = load_labels()
-
-    # load the model
-    model, features_blobs = load_model()
-
-    # load the transformer
-    pre_process = tf.Compose([
-        tf.Resize((224, 224)),
-        tf.ToTensor(),
-        tf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
-
-    # get the softmax weight
-    params = list(model.parameters())
-    weight_softmax = params[-2].data.numpy()
-    weight_softmax[weight_softmax < 0] = 0
-
-    # load the test image
-    img_url = 'http://places.csail.mit.edu/demo/6.jpg'
-    os.system(f'wget {img_url} -q -O test.jpg')
-    img = Image.open('test.jpg')
-    input_img = pre_process(img).unsqueeze(0)
-
-    # forward pass
-    logit = model.forward(input_img)
-    h_x = F.softmax(logit, 1).data.squeeze()
-    probs, idx = h_x.sort(0, True)
-    probs = probs.numpy()
-    idx = idx.numpy()
-
-    print('RESULT ON ' + img_url)
-
-    # output the IO prediction
-    io_image = np.mean(io_labels[idx[:10]])  # vote for the indoor or outdoor
-    env_type = 'indoor' if io_image < 0.5 else 'outdoor'
-    print(f"-TYPE OF ENVIRONMENT: {env_type}")
-
-    # output the prediction of scene category
-    print('--SCENE CATEGORIES:')
-    for i in range(0, 5):
-        print('{:.3f} -> {}'.format(probs[i], classes[idx[i]]))
-
-    # output the scene attributes
-    responses_attribute = attr_weights.dot(features_blobs[1])
-    idx_a = np.argsort(responses_attribute)
-    print('--SCENE ATTRIBUTES:')
-    print(', '.join([attr_labels[idx_a[i]] for i in range(-1, -10, -1)]))
-
+    model = Places365.from_model('wideresnet18_places365.pth.tar')
+    res = model.classify('test.jpg')
+    print(res)
     # generate class activation mapping (CAM)
     # print('Class activation map is saved as cam.jpg')
     # CAMs = returnCAM(features_blobs[0], weight_softmax, [idx[0]])

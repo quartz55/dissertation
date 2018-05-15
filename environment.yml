@@ -13,8 +13,8 @@ dependencies:
   - conda-forge::av
   - pip:
     - git+https://github.com/Breakthrough/PySceneDetect@master#egg=PySceneDetect
-    - git+https://gitlab.com/EAVISE/brambox@master#egg=brambox
-    - git+https://gitlab.com/EAVISE/lightnet@master#egg=lightnet
+#    - git+https://gitlab.com/EAVISE/brambox@master#egg=brambox
+#    - git+https://gitlab.com/EAVISE/lightnet@master#egg=lightnet
     - aiofiles
     - aiohttp
     - aiostream

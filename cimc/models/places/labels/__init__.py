@@ -21,7 +21,7 @@ def load_labels():
     with open(categories) as f:
         for line in f:
             classes.append(line.strip().split(' ')[0][3:])
-    classes = tuple(classes)
+    classes = np.array(classes)
 
     # indoor and outdoor relevant
     io_places = _download('https://raw.githubusercontent.com/csailvision/places365/master/IO_places365.txt')
@@ -38,7 +38,7 @@ def load_labels():
         'https://raw.githubusercontent.com/csailvision/places365/master/labels_sunattribute.txt')
     with open(attributes_places) as f:
         lines = f.readlines()
-        attr_labels = [item.rstrip() for item in lines]
+        attr_labels = np.array([item.rstrip() for item in lines])
 
     attr_weights = _download('http://places2.csail.mit.edu/models_places365/W_sceneattribute_wideresnet18.npy')
     attr_weights = np.load(attr_weights)
