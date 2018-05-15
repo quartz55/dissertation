@@ -87,7 +87,7 @@ class Places365(ResNet):
             features[name] = np.squeeze(o.detach().numpy())
 
         hooks['layer4'] = self.layer4.register_forward_hook(f.partial(hook, 'layer4'))
-        hooks['avgpool'] = self.layer4.register_forward_hook(f.partial(hook, 'avgpool'))
+        hooks['avgpool'] = self.avgpool.register_forward_hook(f.partial(hook, 'avgpool'))
 
         # get the softmax weight
         params = list(self.parameters())
