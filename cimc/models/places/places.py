@@ -10,14 +10,15 @@ from scipy.misc import imresize as imresize
 from torch.nn import functional as F
 from torchvision import transforms as tf
 
+import cimc.resources as resources
 import cimc.utils as utils
 from .labels import load_labels
 from .wideresnet import ResNet, BasicBlock
 
 
-class SceneType(Enum):
-    INDOOR = 'indoor'
-    OUTDOOR = 'outdoor'
+class SceneType(int, Enum):
+    INDOOR = 0
+    OUTDOOR = 1
 
 
 @attr.s(slots=True)
@@ -35,7 +36,7 @@ class SceneClassification:
 
     def __str__(self):
         tmp = f"┌─SCENE CLASSIFICATION\n" \
-              f"├─TYPE: {self.type.value}\n" \
+              f"├─TYPE: {self.type.name}\n" \
               f"{'├' if len(self.attributes) > 0 else '└'}─CATEGORIES:\n"
         for cat in self.categories:
             tmp += f"│   {cat.name}({cat.confidence*100:.2f}%)\n"
@@ -84,14 +85,14 @@ class Places365(ResNet):
         hooks = {}
 
         def hook(name, _m, _i, o):
-            features[name] = np.squeeze(o.detach().numpy())
+            features[name] = np.squeeze(o.detach().cpu().numpy())
 
         hooks['layer4'] = self.layer4.register_forward_hook(f.partial(hook, 'layer4'))
         hooks['avgpool'] = self.avgpool.register_forward_hook(f.partial(hook, 'avgpool'))
 
         # get the softmax weight
         params = list(self.parameters())
-        weight_softmax = params[-2].data.numpy()
+        weight_softmax = params[-2].data.cpu().numpy()
         weight_softmax[weight_softmax < 0] = 0
         t1 = time.time()
         img_input = self.pre_process(img).unsqueeze(0).to(next(self.parameters()).device)
@@ -103,7 +104,7 @@ class Places365(ResNet):
 
             h_x = F.softmax(logit, 1).data.squeeze()
             probs, idx = h_x.sort(0, True)
-            probs, idx = probs.numpy(), idx.numpy()
+            probs, idx = probs.cpu().numpy(), idx.cpu().numpy()
 
             io_image = np.mean(self.io_labels[idx[:10]])  # vote for the indoor or outdoor
             responses_attribute = self.attr_weights.dot(features['avgpool'])
@@ -118,7 +119,8 @@ class Places365(ResNet):
                 'pre_process': t2 - t1,
                 'forward_pass': t3 - t2,
                 'result_prep': t4 - t3,
-                'result_creation': t5 - t4
+                'result_creation': t5 - t4,
+                'total': t5 - t1
             }
             result = SceneClassification(env_type, cats, attrs, timings)
             for h in hooks.values():
@@ -126,19 +128,35 @@ class Places365(ResNet):
             return result
 
     @classmethod
-    def from_model(cls, model_file: str):
+    def pre_trained(cls, model_file: str = None):
+        if model_file is None:
+            model_file = resources.weight("widerestnet18_places365.pth.tar")
+        utils.simple_download('http://places2.csail.mit.edu/models_places365/wideresnet18_places365.pth.tar',
+                              model_file)
         m = cls()
-        checkpoint = torch.load(model_file, map_location=lambda st, loc: st)
-        state_dict = {str.replace(k, 'module.', ''): v
-                      for k, v in checkpoint['state_dict'].items()}
-        m.load_state_dict(state_dict)
+        checkpoint = torch.load(model_file)
+        m.load_state_dict({str.replace(k, 'module.', ''): v
+                           for k, v in checkpoint['state_dict'].items()})
         return m
 
 
 def main():
-    model = Places365.from_model('wideresnet18_places365.pth.tar')
-    res = model.classify('test.jpg')
+    model = Places365.pre_trained()
+    model.to(utils.best_device)
+    n_timings = 50
+    timings = np.empty(n_timings)
+    test_image = resources.image('places-test.jpg')
+    # Warmup
+    for i in range(5):
+        model.classify(test_image)
+    for i in range(n_timings):
+        t1 = time.time()
+        res = model.classify(test_image)
+        timings[i] = time.time() - t1
+    avg_time = np.mean(timings)
+    print(f"{avg_time*1e3:.4f}ms")
     print(res)
+    print(res.timings)
     # generate class activation mapping (CAM)
     # print('Class activation map is saved as cam.jpg')
     # CAMs = returnCAM(features_blobs[0], weight_softmax, [idx[0]])

@@ -61,6 +61,7 @@ logger = logging.getLogger()
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
 
+
 # endregion
 
 
@@ -260,7 +261,7 @@ class AccelDownload(Download):
             for i in range(self.num_segments):
                 start = i * segment_size
                 end = self.size if i == self.num_segments - 1 else (
-                    (i + 1) * segment_size) - 1
+                                                                           (i + 1) * segment_size) - 1
                 ranges.append((start, end))
             logger.debug(
                 f"Preparing {self.num_segments} requests for '{self.uri}'")

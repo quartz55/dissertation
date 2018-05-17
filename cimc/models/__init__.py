@@ -1,2 +1,2 @@
-#from .yolov2 import YoloV2
+from .places import Places365
 from .yolov3 import YoloV3

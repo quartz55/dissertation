@@ -23,7 +23,7 @@ class TrackedBoundingBox(BoundingBox):
                    bbox.confidence, tracking_id)
 
     def __repr__(self):
-        return f"({self.tracking_id})" + super().__repr__()
+        return f"({self.tracking_id}){super().__repr__()}"
 
 
 def convert_bbox_to_z(bbox: BoundingBox):
@@ -203,15 +203,24 @@ class Tracker:
         for i in mr.new_matches:
             self.trackers.append(KalmanBoxTracker(bboxes[i]))
 
-        # Cleanup zombie trackers
         ret = []
         for i, tracker in reversed(list(enumerate(self.trackers))):
+            tracker: KalmanBoxTracker
+            # Cleanup zombie trackers
             if tracker.time_since_update > self.max_age:
                 self.trackers.pop(i)
                 continue
-            # elif tracker.hit_streak >= self.min_hits or self.curr_frame <= self.min_hits:
+
+            # Don't include uncertain trackers
+            if (tracker.time_since_update > 0
+                    and tracker.hits < 10
+                    and tracker.bbox().area < 500):
+                continue
+
+            # if tracker.hits >= self.min_hits or self.curr_frame <= self.min_hits:
             #     ret.append(TrackedBoundingBox.from_bbox(tracker.bbox(), tracker.id))
-            if tracker.hits >= self.min_hits or self.curr_frame <= self.min_hits:
+
+            if tracker.hits >= self.min_hits:
                 ret.append(TrackedBoundingBox.from_bbox(tracker.bbox(), tracker.id))
         return ret
 
@@ -225,7 +234,6 @@ class MultiTracker:
         self.trackers: Dict[int, Tracker] = {}
 
     def update(self, bboxes):
-        self.curr_frame += 1
         per_class = {cls: [] for cls in self.trackers}
         for bbox in bboxes:
             if bbox.class_id in per_class:
@@ -240,4 +248,5 @@ class MultiTracker:
                 tracker.curr_frame = self.curr_frame
                 self.trackers[cls] = tracker
             tracked[cls] = self.trackers[cls].update(bbs)
+        self.curr_frame += 1
         return tracked

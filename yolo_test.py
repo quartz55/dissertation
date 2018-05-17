@@ -1,3 +1,5 @@
+import functools as f
+import operator as op
 import os.path
 import pickle
 import re
@@ -5,44 +7,24 @@ from typing import List, Union, Tuple, Dict
 
 import imageio
 import numpy as np
-import torch
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from torchvision import transforms
 from tqdm import tqdm
-import functools as f
-import operator as op
 
 import cimc.core.bbox as bbox
+import cimc.resources as resources
+from cimc import utils
 from cimc.core.bbox import BoundingBox, Point
-from cimc.core.tracker import TrackedBoundingBox, Tracker, MultiTracker
 from cimc.models.labels import COCO_LABELS
 from cimc.models.yolov3 import YoloV3
-
-
-class Resources:
-    root = 'resources'
-
-    @staticmethod
-    def font(name: str) -> str:
-        return os.path.join(Resources.root, 'fonts', name)
-
-    @staticmethod
-    def video(name: str) -> str:
-        return os.path.join(Resources.root, 'videos', name)
-
-    @staticmethod
-    def weights(name: str) -> str:
-        return os.path.join(Resources.root, 'weights', name)
-
+from cimc.tracker import TrackedBoundingBox, MultiTracker
 
 try:
-    font = ImageFont.truetype(Resources.font('DejaVuSansMono.ttf'), 10)
-    font_bold = ImageFont.truetype(Resources.font('DejaVuSansMono-Bold.ttf'), 10)
+    font = ImageFont.truetype(resources.font('DejaVuSansMono.ttf'), 10)
+    font_bold = ImageFont.truetype(resources.font('DejaVuSansMono-Bold.ttf'), 10)
 except (FileNotFoundError, OSError):
     font = ImageFont.load_default()
     font_bold = ImageFont.load_default()
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 Color = Union[Tuple[int, int, int], Tuple[int, int, int, int]]
 
@@ -179,8 +161,8 @@ class VideoDetections:
         self.detections: List[List[BoundingBox]] = []
 
     def run(self):
-        net = YoloV3.pre_trained(Resources.weights('yolov3.weights'))
-        net.to(device)
+        net = YoloV3.pre_trained(resources.weight('yolov3.weights'))
+        net.to(utils.best_device)
         with imageio.get_reader(self.video_uri) as reader:
             size = reader.get_meta_data()['size']
             pp = transforms.Compose([bbox.ReverseScale(*size),
@@ -241,7 +223,9 @@ def test_tracking(dets_file: str):
                       unit='frame',
                       dynamic_ncols=True) as video:
                 class_colors = make_class_labels(COCO_LABELS)
-                tracker = MultiTracker(int(fps), iou_thres=0.2)
+                tracker = MultiTracker(max_age=int(fps),
+                                       min_hits=int(fps / 2),
+                                       iou_thres=0.35)
                 timings = np.empty(len(video))
                 for frame, bboxes in zip(enumerate(video), detections.detections):
                     idx, frame = frame
@@ -256,13 +240,15 @@ def test_tracking(dets_file: str):
 
 
 if __name__ == '__main__':
-    import cProfile
-    # gen_detections(Resources.video('TUD-Campus.mp4'))
-    # gen_detections(Resources.video('TUD-Crossing.mp4'))
-    # gen_detections(Resources.video('Venice-1.mp4'))
-    # test_tracking(Resources.video('TUD-Campus.dets'))
-    # test_tracking(Resources.video('TUD-Crossing.dets'))
-    # test_tracking(Resources.video('Venice-1.dets'))
+    pass
+    # gen_detections(resources.video('TUD-Campus.mp4'))
+    # gen_detections(resources.video('TUD-Crossing.mp4'))
+    # gen_detections(resources.video('Venice-1.mp4'))
+    # gen_detections(resources.video('goldeneye.mp4'))
+    test_tracking(resources.video('goldeneye.dets'))
+    # test_tracking(resources.video('TUD-Campus.dets'))
+    # test_tracking(resources.video('TUD-Crossing.dets'))
+    # test_tracking(resources.video('Venice-1.dets'))
     # pr = cProfile.Profile()
     # pr.enable()
     # test_tracking()
