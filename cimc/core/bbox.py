@@ -1,7 +1,6 @@
 from typing import Optional, Tuple, List
 
 import numpy as np
-from brambox.boxes.detections import Detection
 from numba import njit, double
 
 from cimc.core.vec import Vec2
@@ -115,14 +114,6 @@ class BoundingBox:
         class_name = labels[class_id] if labels is not None else None
         return cls((Point(x1, y1), Point(x2, y2)), class_id, class_name, box[4].item())
 
-    @classmethod
-    def from_brambox(cls, bbox: Detection, labels: List[str] = None):
-        top_left = Point(bbox.x_top_left, bbox.y_top_left)
-        bot_right = top_left + Point(bbox.width, bbox.height)
-        class_id = int(bbox.class_label)
-        class_name = labels[class_id] if labels is not None else None
-        return cls((top_left, bot_right), class_id, class_name, bbox.confidence)
-
     def __repr__(self):
         tx, ty = self.top_left
         bx, by = self.bot_right
@@ -154,11 +145,3 @@ class FromYoloOutput:
 
     def __call__(self, box: List[float]) -> BoundingBox:
         return BoundingBox.from_yolo(box, self.labels)
-
-
-class FromBramBox:
-    def __init__(self, labels: List[str]):
-        self.labels = labels
-
-    def __call__(self, brambox: Detection) -> BoundingBox:
-        return BoundingBox.from_brambox(brambox, self.labels)

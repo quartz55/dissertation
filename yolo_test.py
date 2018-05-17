@@ -213,11 +213,12 @@ def gen_detections(video_file: str):
 def test_tracking(dets_file: str):
     import time
     detections: VideoDetections = VideoDetections.load(dets_file)
-    video_name = os.path.splitext(detections.video_uri)[0]
-    video_name += "-tracked.mp4"
-    with imageio.get_reader(detections.video_uri) as video:
+    vid_base_uri = os.path.splitext(dets_file)[0]
+    in_uri = f"{vid_base_uri}.mp4"
+    out_uri = f"{vid_base_uri}-tracked.mp4"
+    with imageio.get_reader(in_uri) as video:
         fps = video.get_meta_data()['fps']
-        with imageio.get_writer(video_name, fps=fps, quality=6) as writer:
+        with imageio.get_writer(out_uri, fps=fps, quality=6) as writer:
             with tqdm(video,
                       f"Tracking detections of '{detections.video_uri}'",
                       unit='frame',
@@ -246,9 +247,9 @@ if __name__ == '__main__':
     # gen_detections(resources.video('Venice-1.mp4'))
     # gen_detections(resources.video('goldeneye.mp4'))
     test_tracking(resources.video('goldeneye.dets'))
-    # test_tracking(resources.video('TUD-Campus.dets'))
-    # test_tracking(resources.video('TUD-Crossing.dets'))
-    # test_tracking(resources.video('Venice-1.dets'))
+    test_tracking(resources.video('TUD-Campus.dets'))
+    test_tracking(resources.video('TUD-Crossing.dets'))
+    test_tracking(resources.video('Venice-1.dets'))
     # pr = cProfile.Profile()
     # pr.enable()
     # test_tracking()

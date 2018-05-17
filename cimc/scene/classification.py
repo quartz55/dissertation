@@ -27,7 +27,6 @@ def classify_scene(video: imageio.core.Format.Reader, interval: float = 1):
 
 def test_classify_scene():
     import imageio
-    # test_video = resources.videos('TUD-Campus.mp4')
     test_video = resources.video('Venice-1.mp4')
     with imageio.get_reader(test_video) as video:
         classify_scene(video)

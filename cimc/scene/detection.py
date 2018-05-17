@@ -2,6 +2,8 @@ import scenedetect as sd
 from scenedetect.detectors import ContentDetector
 from scenedetect.manager import SceneManager
 
+from cimc import resources
+
 
 class SceneDetector:
     def __init__(self, threshold=0.3, min_length=15, downscale=1):
@@ -17,5 +19,5 @@ class SceneDetector:
 
 if __name__ == '__main__':
     detector = SceneDetector(downscale=4)
-    scenes = detector('resources/videos/bvs.mp4')
+    scenes = detector(resources.video('goldeneye.mp4'))
     print(scenes)

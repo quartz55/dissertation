@@ -134,7 +134,7 @@ class Places365(ResNet):
         utils.simple_download('http://places2.csail.mit.edu/models_places365/wideresnet18_places365.pth.tar',
                               model_file)
         m = cls()
-        checkpoint = torch.load(model_file)
+        checkpoint = torch.load(model_file, map_location=lambda st, loc: st)
         m.load_state_dict({str.replace(k, 'module.', ''): v
                            for k, v in checkpoint['state_dict'].items()})
         return m
