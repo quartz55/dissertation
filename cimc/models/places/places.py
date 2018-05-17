@@ -23,6 +23,7 @@ class SceneType(int, Enum):
 
 @attr.s(slots=True)
 class CategoryPrediction:
+    id: int = attr.ib()
     name: str = attr.ib()
     confidence: float = attr.ib()
 
@@ -112,7 +113,7 @@ class Places365(ResNet):
             t4 = time.time()
 
             env_type = SceneType.INDOOR if io_image < 0.5 else SceneType.OUTDOOR
-            cats = [CategoryPrediction(cls, prob) for prob, cls in zip(probs[:5], self.classes[idx[:5]])]
+            cats = [CategoryPrediction(i, cls, prob) for i, cls, prob in zip(idx[:5], self.classes[idx[:5]], probs[:5])]
             attrs = list(self.attr_labels[idx_a[-1:-10:-1]])
             t5 = time.time()
             timings = {
