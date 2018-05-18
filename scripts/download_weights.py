@@ -15,11 +15,11 @@ from aiostream import stream  # fades
 from tqdm import tqdm  # fades
 
 WEIGHTS = {
-    # 'https://pjreddie.com/media/files/yolov2.weights': 'yolo2.weights',
-    # 'https://pjreddie.com/media/files/yolov3.weights': 'yolo3.weights',
-    'http://ipv4.download.thinkbroadband.com/20MB.zip': '20MB.zip',
-    'http://ipv4.download.thinkbroadband.com/50MB.zip': '50MB.zip',
-    'http://ipv4.download.thinkbroadband.com/100MB.zip': '100MB.zip',
+    'https://pjreddie.com/media/files/yolov2.weights': 'yolov2.weights',
+    'https://pjreddie.com/media/files/yolov3.weights': 'yolov3.weights',
+    # 'http://ipv4.download.thinkbroadband.com/20MB.zip': '20MB.zip',
+    # 'http://ipv4.download.thinkbroadband.com/50MB.zip': '50MB.zip',
+    # 'http://ipv4.download.thinkbroadband.com/100MB.zip': '100MB.zip',
 }
 
 
@@ -60,6 +60,7 @@ handler.setFormatter(fmt)
 logger = logging.getLogger()
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
+
 
 # endregion
 
@@ -260,7 +261,7 @@ class AccelDownload(Download):
             for i in range(self.num_segments):
                 start = i * segment_size
                 end = self.size if i == self.num_segments - 1 else (
-                    (i + 1) * segment_size) - 1
+                                                                           (i + 1) * segment_size) - 1
                 ranges.append((start, end))
             logger.debug(
                 f"Preparing {self.num_segments} requests for '{self.uri}'")

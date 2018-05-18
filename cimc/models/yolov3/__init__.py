@@ -1,1 +1,1 @@
-from .yolov3 import YoloV3, COCO_LABELS
+from .yolov3 import YoloV3

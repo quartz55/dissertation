@@ -1,3 +1,6 @@
+datasets/*
+.directory
+
 # Created by https://www.gitignore.io/api/python
 ### Python ###
 # Byte-compiled / optimized / DLL files

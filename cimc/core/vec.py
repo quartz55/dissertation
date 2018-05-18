@@ -1,7 +1,7 @@
 import numpy as np
 from functools import partial
 import numbers
-from typing import Any, Tuple, Dict, List, Union, TypeVar, Type
+from typing import Any, Tuple, Dict, List, Iterable, Union, TypeVar, Type
 
 FIELD_NAMES = ['x', 'y', 'z', 'w']
 
@@ -49,7 +49,7 @@ class VecMeta(type):
 
 
 VecType = TypeVar('VecType', bound='Vec')
-VecArgs = Union[np.ndarray, VecType, List[numbers.Number]]
+VecArgs = Union[np.ndarray, VecType, Iterable[numbers.Number]]
 Scalar = numbers.Number
 
 
@@ -60,7 +60,7 @@ class Vec(metaclass=VecMeta):
 
     __slots__ = ['_data']
 
-    def __init__(self, *args: VecArgs, **kwargs: Dict[str, _dtype]) -> None:
+    def __init__(self, *args: VecArgs, **kwargs: _dtype) -> None:
         self._data = np.zeros(self._size, self._dtype)
         if len(args) > 0:
             data = args[0]

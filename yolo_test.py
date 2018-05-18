@@ -1,25 +1,60 @@
-from PIL import Image, ImageDraw, ImageFont, ImageColor
-
+import functools as f
+import operator as op
+import os.path
+import pickle
+import re
 from typing import List, Union, Tuple, Dict
+
 import imageio
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageColor
+from torchvision import transforms
 from tqdm import tqdm
 
-from cimc.models.labels import COCO_LABELS
 import cimc.core.bbox as bbox
+import cimc.resources as resources
+from cimc import utils
 from cimc.core.bbox import BoundingBox, Point
-import re
+from cimc.models.labels import COCO_LABELS
+from cimc.models.yolov3 import YoloV3
+from cimc.tracker import TrackedBoundingBox, MultiTracker
 
-font = ImageFont.truetype('resources/DejaVuSansMono.ttf', 16)
-font_bold = ImageFont.truetype('resources/DejaVuSansMono-Bold.ttf', 16)
+try:
+    font = ImageFont.truetype(resources.font('DejaVuSansMono.ttf'), 10)
+    font_bold = ImageFont.truetype(resources.font('DejaVuSansMono-Bold.ttf'), 10)
+except (FileNotFoundError, OSError):
+    font = ImageFont.load_default()
+    font_bold = ImageFont.load_default()
 
 Color = Union[Tuple[int, int, int], Tuple[int, int, int, int]]
+
+
+def take(gen, n=1):
+    class TakeGenerator:
+        def __init__(self):
+            self.__gen = iter(gen)
+            self.__i = 1
+            self.__n = min(n, len(gen))
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self.__i > self.__n:
+                raise StopIteration
+            self.__i += 1
+            return next(self.__gen)
+
+        def __len__(self):
+            return self.__n
+
+    return TakeGenerator()
 
 
 class ClassLabel:
     __slots__ = ['name', 'color']
 
-    def __init__(self, name: str, color: Color = ImageColor.getrgb('red')):
+    def __init__(self, name: str = None, color: Color = ImageColor.getrgb('red')):
         self.name = name
         self.color = color
 
@@ -47,112 +82,176 @@ def draw_detections(image: Image.Image, bboxes: List[BoundingBox],
     result = image.copy()
     draw = ImageDraw.Draw(result)
     for box in bboxes:
-        label = class_colors.get(box.class_id, ClassLabel(None, (32, 32, 32)))
-        thick = 5
+        label = class_colors.get(box.class_id, ClassLabel(color=(32, 32, 32)))
+        thick = 2
         top_left = Point.max(box.top_left, Point(0, 0))
-        bot_right = Point.min(box.bot_right, Point(image.width - 1, image.height - 1))
+        bot_right = Point.min(box.bot_right, Point(
+            image.width - 1, image.height - 1))
         top_right = Point(bot_right.x, top_left.y)
         bot_left = Point(top_left.x, bot_right.y)
         # Draw rectangle outline manually
-        draw.rectangle([tuple(top_left), tuple(top_right + Point(y=thick))], fill=label.color)
-        draw.rectangle([tuple(top_right - Point(x=thick)), tuple(bot_right)], fill=label.color)
-        draw.rectangle([tuple(bot_left - Point(y=thick)), tuple(bot_right)], fill=label.color)
-        draw.rectangle([tuple(top_left), tuple(bot_left + Point(x=thick))], fill=label.color)
+        draw.rectangle([tuple(top_left), tuple(
+            top_right + Point(y=thick))], fill=label.color)
+        draw.rectangle([tuple(top_right - Point(x=thick)),
+                        tuple(bot_right)], fill=label.color)
+        draw.rectangle([tuple(bot_left - Point(y=thick)),
+                        tuple(bot_right)], fill=label.color)
+        draw.rectangle([tuple(top_left), tuple(
+            bot_left + Point(x=thick))], fill=label.color)
         if label.name is not None:
-            pad = 5
+            pad = 3
             text = f"{label.name}({box.confidence*100:.0f}%)"
             text_w, text_h = font.getsize(text)
-            top_left = Point.max(top_left - Point(y=text_h + pad), Point(0, 0))
-            bot_right = top_left + Point(x=text_w + 2 * pad, y=text_h + 2 * pad)
+            top_left = Point.max(
+                top_left - Point(y=text_h + pad * 2 - thick), Point(0, 0))
+            bot_right = top_left + \
+                        Point(x=text_w + 2 * pad, y=text_h + 2 * pad)
             draw.rectangle([tuple(top_left),
                             tuple(bot_right)],
                            fill=label.color)
-            draw.text(tuple(top_left + Point(pad, pad)), text, fill='white', font=font_bold)
+            draw.text(tuple(top_left + Point(pad, pad)),
+                      text, fill='white', font=font_bold)
     return result
 
 
-def test_yolo2(duration: int):
-    from cimc.models.yolov2 import YoloV2
+def draw_tracked(image: Image.Image, tracked: List[TrackedBoundingBox],
+                 class_colors: Dict[int, ClassLabel] = None) -> Image.Image:
+    if len(tracked) == 0:
+        return image
+    if class_colors is None:
+        class_colors = {}
+    w, h = image.width, image.height
+    result = image.copy()
+    draw = ImageDraw.Draw(result)
+    for box in tracked:
+        label = class_colors.get(box.class_id, ClassLabel(color=(32, 32, 32)))
+        thick = 2
+        top_left = Point.max(box.top_left, Point(0, 0))
+        bot_right = Point.min(box.bot_right, Point(w - 1, h - 1))
+        top_right = Point(bot_right.x, top_left.y)
+        bot_left = Point(top_left.x, bot_right.y)
+        # Draw rectangle outline manually
+        draw.rectangle([tuple(top_left), tuple(
+            top_right + Point(y=thick))], fill=label.color)
+        draw.rectangle([tuple(top_right - Point(x=thick)),
+                        tuple(bot_right)], fill=label.color)
+        draw.rectangle([tuple(bot_left - Point(y=thick)),
+                        tuple(bot_right)], fill=label.color)
+        draw.rectangle([tuple(top_left), tuple(
+            bot_left + Point(x=thick))], fill=label.color)
+        if label.name is not None:
+            pad = 2
+            text = f"{label.name}{box.tracking_id}"
+            text_w, text_h = font.getsize(text)
+            top_left = Point.max(
+                top_left - Point(y=text_h + pad * 2 - thick), Point(0, 0))
+            bot_right = top_left + \
+                        Point(x=text_w + 2 * pad, y=text_h + 2 * pad)
+            draw.rectangle([tuple(top_left),
+                            tuple(bot_right)],
+                           fill=label.color)
+            draw.text(tuple(top_left + Point(pad, pad)),
+                      text, fill='white', font=font_bold)
+    return result
 
-    def detect_video(net: YoloV2, video_uri: str, out_uri: str, duration: int = None):
-        post_process = bbox.FromBramBox(COCO_LABELS)
-        from imageio.plugins.ffmpeg import FfmpegFormat
-        with imageio.get_reader(video_uri) as reader:  # type: FfmpegFormat.Reader
+
+class VideoDetections:
+    def __init__(self, video_uri: str) -> None:
+        self.video_uri = video_uri
+        self.detections: List[List[BoundingBox]] = []
+
+    def run(self):
+        net = YoloV3.pre_trained(resources.weight('yolov3.weights'))
+        net.to(utils.best_device)
+        with imageio.get_reader(self.video_uri) as reader:
+            size = reader.get_meta_data()['size']
+            pp = transforms.Compose([bbox.ReverseScale(*size),
+                                     bbox.FromYoloOutput(COCO_LABELS)])
+            with tqdm(reader, f"Running object detection on '{self.video_uri}'",
+                      unit='frame',
+                      dynamic_ncols=True) as bar:
+                for frame in bar:
+                    boxes = net.detect_image(Image.fromarray(frame))[0]
+                    bboxes = [pp(box) for box in boxes]
+                    self.detections.append(bboxes)
+
+    def render(self, path: str = None, quality: int = 6):
+        savepath = path
+        if savepath is None:
+            base, ext = os.path.splitext(self.video_uri)
+            savepath = f"{base}-detections{ext}"
+        with imageio.get_reader(self.video_uri) as reader:
             fps = reader.get_meta_data()['fps']
-            with imageio.get_writer(out_uri, fps=fps, quality=6) as writer:  # type: FfmpegFormat.Writer
-                bar = tqdm(reader, f"Object detection using '{net.__class__.__name__}' on '{video_uri}'", unit='frame')
-                frames = enumerate(bar)
+            with imageio.get_writer(savepath, fps=fps, quality=quality) as writer:
+                with tqdm(reader,
+                          f"Rendering detections of '{self.video_uri}' to '{savepath}'",
+                          unit='frame',
+                          dynamic_ncols=True) as bar:
+                    class_colors = make_class_labels(COCO_LABELS)
+                    for frame, bboxes in zip(bar, self.detections):
+                        result = draw_detections(
+                            Image.fromarray(frame), bboxes, class_colors)
+                        writer.append_data(np.array(result))
+
+    def save(self, path: str = None):
+        savepath = path or f"{os.path.splitext(self.video_uri)[0]}.dets"
+        with open(savepath, 'wb') as out:
+            pickle.dump(self, out)
+
+    @staticmethod
+    def load(path: str):
+        with open(path, 'rb') as file:
+            return pickle.load(file)
+
+
+def gen_detections(video_file: str):
+    v = VideoDetections(video_file)
+    v.run()
+    v.save()
+
+
+def test_tracking(dets_file: str):
+    import time
+    detections: VideoDetections = VideoDetections.load(dets_file)
+    vid_base_uri = os.path.splitext(dets_file)[0]
+    in_uri = f"{vid_base_uri}.mp4"
+    out_uri = f"{vid_base_uri}-tracked.mp4"
+    with imageio.get_reader(in_uri) as video:
+        fps = video.get_meta_data()['fps']
+        with imageio.get_writer(out_uri, fps=fps, quality=6) as writer:
+            with tqdm(video,
+                      f"Tracking detections of '{detections.video_uri}'",
+                      unit='frame',
+                      dynamic_ncols=True) as video:
                 class_colors = make_class_labels(COCO_LABELS)
-                frame_stop = fps * duration if duration is not None else None
-                for index, frame in frames:
-                    if frame_stop is not None and index >= frame_stop:
-                        break
-                    boxes, image, timings = net.detect_image(frame)
-                    boxes = [post_process(box) for box in boxes[0]]
-                    result = draw_detections(Image.fromarray(image), boxes, class_colors)
+                tracker = MultiTracker(max_age=int(fps),
+                                       min_hits=int(fps / 2),
+                                       iou_thres=0.35)
+                timings = np.empty(len(video))
+                for frame, bboxes in zip(enumerate(video), detections.detections):
+                    idx, frame = frame
+                    t = time.time()
+                    tracked_objects = tracker.update(bboxes)
+                    tracked_objects = f.reduce(op.concat, tracked_objects.values())
+                    timings[idx] = time.time() - t
+                    result = draw_tracked(Image.fromarray(frame), tracked_objects, class_colors)
                     writer.append_data(np.array(result))
-
-    net = YoloV2.pre_trained('resources/yolov2.weights', confidence=0.25)
-    net.cuda()
-    detect_video(net, 'resources/goldeneye.mp4', 'goldeneye-yolo2.mp4', duration)
-
-
-def test_yolo3(duration: int = None):
-    from cimc.models.yolov3 import YoloV3
-    from torchvision import transforms
-
-    def detect_video(net: YoloV3, video_uri: str, out_uri: str, duration: int = None):
-        from imageio.plugins.ffmpeg import FfmpegFormat
-        with imageio.get_reader(video_uri) as reader:  # type: FfmpegFormat.Reader
-            fps = reader.get_meta_data()['fps']
-            size: Tuple[int, int] = reader.get_meta_data()['size']
-            post_process = transforms.Compose([bbox.ReverseScale(*size), bbox.FromYoloOutput(COCO_LABELS)])
-            with imageio.get_writer(out_uri, fps=fps, quality=6) as writer:  # type: FfmpegFormat.Writer
-                bar = tqdm(reader, f"Object detection using '{net.__class__.__name__}' on '{video_uri}'", unit='frame')
-                frames = enumerate(bar)
-                frame_stop = fps * duration if duration is not None else None
-                class_colors = make_class_labels(COCO_LABELS)
-                for index, frame in frames:
-                    if frame_stop is not None and index >= frame_stop:
-                        break
-                    boxes, image, _timings = net.detect_image(Image.fromarray(frame))
-                    bboxes = [post_process(box) for box in boxes]
-                    result = draw_detections(image, bboxes, class_colors)
-                    writer.append_data(np.array(result))
-
-    net = YoloV3.pre_trained('resources/yolov3.weights')
-    net.cuda()
-    detect_video(net, 'resources/goldeneye.mp4', 'goldeneye-yolo3.mp4', duration)
-
-
-def main():
-    import argparse
-    import cProfile
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('model', type=str,
-                        default='yolo3', choices=['yolo2', 'yolo3'],
-                        help="Model to use for detection (yolo2 or yolo3)")
-    parser.add_argument('-d', '--duration', type=int,
-                        help="Duration of the video to detect")
-    parser.add_argument('-P', '--profile', type=str,
-                        help="Outputs cProfile stats to specified file")
-    args = parser.parse_args()
-
-    prof = None
-    if args.profile is not None:
-        prof = cProfile.Profile()
-        prof.enable()
-
-    if args.model == 'yolo2':
-        test_yolo2(args.duration)
-    elif args.model == 'yolo3':
-        test_yolo3(args.duration)
-
-    if prof is not None:
-        prof.disable()
-        prof.dump_stats(args.profile)
+                mean = np.mean(timings)
+                print(f"Average tracking time: {mean}s | {mean*1000}ms | {1/mean}fps")
 
 
 if __name__ == '__main__':
-    main()
+    pass
+    # gen_detections(resources.video('TUD-Campus.mp4'))
+    # gen_detections(resources.video('TUD-Crossing.mp4'))
+    # gen_detections(resources.video('Venice-1.mp4'))
+    # gen_detections(resources.video('goldeneye.mp4'))
+    test_tracking(resources.video('goldeneye.dets'))
+    test_tracking(resources.video('TUD-Campus.dets'))
+    test_tracking(resources.video('TUD-Crossing.dets'))
+    test_tracking(resources.video('Venice-1.dets'))
+    # pr = cProfile.Profile()
+    # pr.enable()
+    # test_tracking()
+    # pr.disable()
+    # pr.dump_stats('tracking.pstats')

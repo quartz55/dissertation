@@ -1,14 +1,15 @@
 import contextlib
-import numbers
+import copy
 import io
+import json
+import numbers
+import shlex
 from fractions import Fraction
 from subprocess import Popen, DEVNULL, PIPE
-import json
+from typing import Tuple, Optional, Dict, Any, Union, List
+
 import numpy as np
 from PIL import Image
-from typing import Tuple, Optional, Dict, Any, Union, List
-import copy
-import shlex
 
 FFmpegArg = Union[str, Tuple[str, Any]]
 FFmpegIO = Dict[str, Union[None, str, List[str]]]
