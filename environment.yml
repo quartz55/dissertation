@@ -1,21 +1,31 @@
-name: dissertation
+name: cimc
 channels:
   - pytorch
   - defaults
 dependencies:
-  - python=3.6
-  - pip
-  - matplotlib
+  - pkgs/main::python=3.6
+  - pkgs/main::pip
+  - pytorch::pytorch
+  # - pytorch::cuda91
+  - pytorch::torchvision
   - numpy
-  - pillow
-  - cuda91
-  - pytorch
-  - torchvision
+  - numba
+  - conda-forge::av
   - pip:
+    - git+https://github.com/Breakthrough/PySceneDetect@master#egg=PySceneDetect
+#    - git+https://gitlab.com/EAVISE/brambox@master#egg=brambox
+#    - git+https://gitlab.com/EAVISE/lightnet@master#egg=lightnet
+    - aiofiles
+    - aiohttp
+    - aiostream
+    - coloredlogs
+    - tqdm
+    - pillow
     - imageio
     - opencv-contrib-python
     - scipy
-    - sk-video
-    - tqdm
+    - scikit-learn
     - visdom
     - vispy
+    - filterpy
+    - attrs
