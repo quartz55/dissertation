@@ -12,7 +12,7 @@ from torchvision import transforms as tf
 
 import cimc.resources as resources
 import cimc.utils as utils
-from .labels import load_labels
+from . import labels as lbl
 from .wideresnet import ResNet, BasicBlock
 
 
@@ -29,21 +29,21 @@ class CategoryPrediction:
 
 
 @attr.s(slots=True, str=False)
-class SceneClassification:
+class PlacesClassification:
     type: SceneType = attr.ib()
     categories: List[CategoryPrediction] = attr.ib(factory=list)
-    attributes: List[str] = attr.ib(factory=list)
+    attributes: np.ndarray = attr.ib(factory=lambda: np.empty(0, lbl.attribute_type))
     timings: Dict[str, float] = attr.ib(factory=dict)
 
     def __str__(self):
-        tmp = f"┌─SCENE CLASSIFICATION\n" \
+        tmp = f"┌─PLACES CLASSIFICATION\n" \
               f"├─TYPE: {self.type.name}\n" \
-              f"{'├' if len(self.attributes) > 0 else '└'}─CATEGORIES:\n"
+              f"├─CATEGORIES:\n"
         for cat in self.categories:
             tmp += f"│   {cat.name}({cat.confidence*100:.2f}%)\n"
         if len(self.attributes) > 0:
             tmp += f"└─ATTRIBUTES:\n" \
-                   f"    {', '.join(sorted(self.attributes))}"
+                   f"    {', '.join(sorted(self.attributes['label']))}"
         return tmp
 
 
@@ -70,13 +70,8 @@ class Places365(ResNet):
             tf.ToTensor(),
             tf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
-        classes, io_labels, attr_labels, attr_weights = load_labels()
-        self.classes = classes
-        self.io_labels = io_labels
-        self.attr_labels = attr_labels
-        self.attr_weights = attr_weights
 
-    def classify(self, image: utils.ImageType) -> SceneClassification:
+    def classify(self, image: utils.ImageType) -> PlacesClassification:
         img = utils.to_image(image)
 
         if self.training:
@@ -107,14 +102,15 @@ class Places365(ResNet):
             probs, idx = h_x.sort(0, True)
             probs, idx = probs.cpu().numpy(), idx.cpu().numpy()
 
-            io_image = np.mean(self.io_labels[idx[:10]])  # vote for the indoor or outdoor
-            responses_attribute = self.attr_weights.dot(features['avgpool'])
+            io_image = np.mean(lbl.CATEGORIES['type'][idx[:10]])  # vote for the indoor or outdoor
+            responses_attribute = lbl.ATTRIBUTES['weights'].dot(features['avgpool'])
             idx_a = np.argsort(responses_attribute)
             t4 = time.time()
 
             env_type = SceneType.INDOOR if io_image < 0.5 else SceneType.OUTDOOR
-            cats = [CategoryPrediction(i, cls, prob) for i, cls, prob in zip(idx[:5], self.classes[idx[:5]], probs[:5])]
-            attrs = list(self.attr_labels[idx_a[-1:-10:-1]])
+            cats = [CategoryPrediction(i, cls, prob)
+                    for i, cls, prob in zip(idx[:5], lbl.CATEGORIES['label'][idx[:5]], probs[:5])]
+            attrs = lbl.ATTRIBUTES[idx_a[-1:-10:-1]]
             t5 = time.time()
             timings = {
                 'pre_process': t2 - t1,
@@ -123,7 +119,7 @@ class Places365(ResNet):
                 'result_creation': t5 - t4,
                 'total': t5 - t1
             }
-            result = SceneClassification(env_type, cats, attrs, timings)
+            result = PlacesClassification(env_type, cats, attrs, timings)
             for h in hooks.values():
                 h.remove()
             return result
