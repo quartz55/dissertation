@@ -2,15 +2,16 @@ from typing import Optional, Tuple
 
 import cv2
 import numpy as np
+import numba as nb
 from numba import jit
 
 from cimc import resources
 
 
-#@jit()
+@jit(nb.boolean(nb.float64[:, :, :], nb.float32))
 def is_cut(frames: np.ndarray, threshold: float = 30.0) -> bool:
     assert frames.shape[0] >= 2, 'Needs at least 2 frames'
-    frame_1, frame_2 = frames[[0, -1]]  # first and last fame
+    frame_1, frame_2 = frames[0], frames[-1]  # first and last fame
     assert frame_1.shape == frame_2.shape, "Frames need to be the same size"
     frame_1_hsv = cv2.split(cv2.cvtColor(frame_1, cv2.COLOR_RGB2HSV))
     frame_2_hsv = cv2.split(cv2.cvtColor(frame_2, cv2.COLOR_RGB2HSV))
@@ -21,8 +22,7 @@ def is_cut(frames: np.ndarray, threshold: float = 30.0) -> bool:
         frame_1_hsv[i] = frame_1_hsv[i].astype(np.int32)
         frame_2_hsv[i] = frame_2_hsv[i].astype(np.int32)
         delta_hsv[i] = np.sum(np.abs(frame_2_hsv[i] - frame_1_hsv[i])) / float(num_pixels)
-    delta_h, delta_s, delta_v = delta_hsv
-    delta_hsv_avg = sum(delta_hsv) / 3.0
+    delta_hsv_avg: float = np.sum(delta_hsv) / 3.0
 
     return delta_hsv_avg >= threshold
 
@@ -50,17 +50,13 @@ class SceneDetector:
             self._skip_to = self._curr_id + self.skip
             if self._curr_id == 0:
                 cut = True
-                self._last_scene = -self.min_length
-            elif self._last_frame is not None:
+                self._last_scene = 0
+            elif (self._last_frame is not None
+                    and self._curr_id - self._last_scene >= self.min_length):
                 f1 = self.downscale(self._last_frame, self.downscale_factor)
                 f2 = self.downscale(frame, self.downscale_factor)
-                if is_cut(np.array([f1, f2]), self.threshold):
-                    cut = True
+                cut = is_cut(np.array([f1, f2]), self.threshold)
             self._last_frame = frame
-        if cut and self._curr_id - self._last_scene >= self.min_length:
-            self._last_scene = self._curr_id
-        else:
-            cut = False
         self._curr_id += 1
         return cut
 
@@ -73,7 +69,7 @@ def detect(video_uri: str):
     import imageio
     import os.path
     from tqdm import tqdm
-    detector = SceneDetector(downscale=4, skip=1)
+    detector = SceneDetector(downscale=4, skip=5)
     scenes = []
     bleep_cut = 0
     with imageio.get_reader(video_uri) as video:
@@ -92,15 +88,17 @@ def detect(video_uri: str):
                     scenes.append(i)
                 out_frame = frame
                 if bleep_cut > 0:
-                    out_frame[-100:, 100:] = [255, 0, 0]
+                    out_frame[-100:, -100:] = [255, 0, 0]
                     bleep_cut -= 1
                 out.append_data(out_frame)
             bar.close()
+        if scenes[-1] != len(video):
+            scenes.append(len(video))
     return scenes
 
 
 if __name__ == '__main__':
     scenes = detect(resources.video('goldeneye.mp4'))
     print(scenes)
-    scene_ranges = list(zip(scenes[:-1], scenes[1:]))
+    scene_ranges = list(zip(scenes[:-1], (scenes + [0])[1:]))
     print(scene_ranges)
