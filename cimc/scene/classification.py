@@ -14,6 +14,28 @@ class SceneClassification(PlacesClassification):
     length: int = attr.ib(default=1)
 
 
+class SceneClassifier:
+    def __init__(self, fps: float, interval: float = 1):
+        self.interval = interval
+        self.places_net = Places365.pre_trained().to(utils.best_device)
+        self._curr_frame = 0
+        self._next_frame = 0
+        self._results = []
+        self._probs_cats = np.zeros(len(lbl.CATEGORIES))
+        self._probs_acc = np.zeros(len(lbl.ATTRIBUTES))
+
+    def update(self, frame: np.ndarray, idx: int = None):
+        if idx is not None:
+            self._curr_frame = idx
+        pass
+
+    def classify(self):
+        pass
+
+    def reset(self):
+        pass
+
+
 def classify_scene(video: imageio.core.Format.Reader, interval: float = 1):
     places_net = Places365.pre_trained()
     places_net.to(utils.best_device)
