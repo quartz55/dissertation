@@ -50,7 +50,7 @@ def rgb2hsv(frame):
     return out
 
 
-@jit(nb.boolean(nb.float64[:, :, :], nb.float32))
+# @jit(nb.boolean(nb.float64[:, :, :], nb.float32))
 def is_cut(frames: np.ndarray, threshold: float = 30.0) -> bool:
     assert frames.shape[0] >= 2, 'Needs at least 2 frames'
     frame_1, frame_2 = frames[0], frames[-1]  # first and last fame
@@ -60,11 +60,6 @@ def is_cut(frames: np.ndarray, threshold: float = 30.0) -> bool:
 
     delta_hsv = np.mean(np.mean(np.abs(frame_2_hsv - frame_1_hsv), axis=0), axis=0)
     delta_hsv_avg = np.sum(delta_hsv) / 3.0
-
-    # delta_hsv = np.empty(3, dtype=np.float64)
-    # for i in range(3):
-    #     delta_hsv[i] = np.sum(np.abs(frame_2_hsv[:, :, i] - frame_1_hsv[:, :, i])) / float(num_pixels)
-    # delta_hsv_avg: float = np.sum(delta_hsv) / 3.0
 
     return delta_hsv_avg >= threshold
 
@@ -173,6 +168,29 @@ def test_rgb2hsv():
                              [[0, 0, 255], [200, 200, 50]]],
                             dtype=torch.double)
     rgb = rgb2hsv(ex_frame)
+
+
+def test_detector():
+    sample = np.ones((10, 10, 3), np.uint8)
+    scene_1 = (sample * [255, 0, 0]).astype(np.uint8)
+    scene_2 = (sample * [0, 255, 0]).astype(np.uint8)
+    scene_3 = (sample * [0, 0, 255]).astype(np.uint8)
+    detector = SceneDetector(threshold=5)
+    assert detector.update(scene_1), "First frame should always be a new scene"
+    for _ in range(detector.min_length - 1):
+        assert not detector.update(scene_2), "No scene cuts if in min length"
+    assert detector._curr_id == detector.min_length
+    assert detector.update(scene_3), "Should detect after min length"
+
+    # With a skip of 3 and min_length of 10 the first cut should be found
+    # on frame number 12 (Saved frames: 0, 3, 6, 9, 12, 15, ...)
+    detector = SceneDetector(threshold=5, min_length=10, skip=3)
+    for _ in range(detector.min_length):
+        detector.update(scene_1)
+    assert not detector.update(scene_2), "Should skip frames"
+    detector.update(scene_2)
+    assert detector._curr_id == 12
+    assert detector.update(scene_2)
 
 
 def test_detect():
