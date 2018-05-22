@@ -250,3 +250,7 @@ class MultiTracker:
             tracked[cls] = self.trackers[cls].update(bbs)
         self.curr_frame += 1
         return tracked
+
+    def reset(self):
+        self.curr_frame = 0
+        self.trackers = {}

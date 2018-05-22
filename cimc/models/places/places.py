@@ -22,6 +22,12 @@ class SceneType(int, Enum):
 
 
 @attr.s(slots=True)
+class Attribute:
+    id: int = attr.ib()
+    name: str = attr.ib()
+
+
+@attr.s(slots=True)
 class CategoryPrediction:
     id: int = attr.ib()
     name: str = attr.ib()
@@ -32,7 +38,7 @@ class CategoryPrediction:
 class PlacesClassification:
     type: SceneType = attr.ib()
     categories: List[CategoryPrediction] = attr.ib(factory=list)
-    attributes: np.ndarray = attr.ib(factory=lambda: np.empty(0, lbl.attribute_type))
+    attributes: List[Attribute] = attr.ib(factory=list)
     timings: Dict[str, float] = attr.ib(factory=dict)
 
     def __str__(self):
@@ -110,7 +116,8 @@ class Places365(ResNet):
             env_type = SceneType.INDOOR if io_image < 0.5 else SceneType.OUTDOOR
             cats = [CategoryPrediction(i, cls, prob)
                     for i, cls, prob in zip(idx[:5], lbl.CATEGORIES['label'][idx[:5]], probs[:5])]
-            attrs = lbl.ATTRIBUTES[idx_a[-1:-10:-1]]
+            attrs = [Attribute(id=id, label=label)
+                     for id, label in lbl.ATTRIBUTES[idx_a[-1:-10:-1]][['id', 'label']]]
             t5 = time.time()
             timings = {
                 'pre_process': t2 - t1,
