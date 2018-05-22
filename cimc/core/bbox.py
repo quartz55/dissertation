@@ -12,12 +12,22 @@ class Point(Vec2):
 
 @njit(double(double[:], double[:]))
 def iou(bb_a, bb_b):
+    """
+    Calculates Intersection over Union (IoU)
+
+    :param bb_a: Bounding box in the format [x1, y1, x2, y2]
+    :type bb_a: List[float]
+    :param bb_b: Bounding box in the format [x1, y1, x2, y2]
+    :type bb_b: List[float]
+    :return: IoU of boxes (percentage)
+    :rtype: float
+    """
     a_x1, a_y1, a_x2, a_y2 = bb_a[:4]
     b_x1, b_y1, b_x2, b_y2 = bb_b[:4]
-    i_x1 = np.maximum(a_x1, b_x1)
-    i_y1 = np.maximum(a_y1, b_y1)
-    i_x2 = np.minimum(a_x2, b_x2)
-    i_y2 = np.minimum(a_y2, b_y2)
+    i_x1 = max(a_x1, b_x1)
+    i_y1 = max(a_y1, b_y1)
+    i_x2 = min(a_x2, b_x2)
+    i_y2 = min(a_y2, b_y2)
 
     if i_x2 < i_x1 or i_y2 < i_y1:
         return 0.0
@@ -90,13 +100,14 @@ class BoundingBox:
         return self.width * self.height
 
     def iou(self, other) -> float:
-        return iou(self.numpy(), other.numpy())
+        return iou(self._data, other._data)
 
     def numpy(self):
         return self._data.copy()
 
     @classmethod
     def from_array(cls, a, labels: List[str] = None):
+        """In the format [x1, y1, x2, y2] (top left and bottom right)"""
         assert len(a) >= 4, "Array needs to have at least 4 elements"
         tl, br = Point(a[0], a[1]), Point(a[2], a[3])
         conf = a[4] if len(a) > 4 else None
@@ -106,6 +117,7 @@ class BoundingBox:
 
     @classmethod
     def from_yolo(cls, box: List[float], labels: List[str] = None):
+        """In the format [x, y, w, h] (center with width and height)"""
         x1 = box[0] - box[2] / 2
         y1 = box[1] - box[3] / 2
         x2 = box[0] + box[2] / 2

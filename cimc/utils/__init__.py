@@ -12,7 +12,7 @@ best_device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def to_image(image: ImageType):
     if isinstance(image, Image.Image):
-        img = image
+        img = image.convert('RGB')
     elif isinstance(image, str):
         img = Image.open(image).convert('RGB')
     elif isinstance(image, np.ndarray):
@@ -26,13 +26,13 @@ def simple_download(url: str, out: str = None, dir: str = None, force: bool = Fa
     if out is None or len(out) < 1:
         out = os.path.basename(url)
     if dir is None or len(dir) < 1:
-        dir = '.'
-    if not os.path.isabs(dir):
+        dir = os.getcwd()
+    elif not os.path.isabs(dir):
         dir = os.path.abspath(dir)
     assert os.path.isdir(dir), 'Invalid download directory'
     path = os.path.join(dir, out)
 
-    if force or not os.access(out, os.W_OK):
+    if force or not os.access(path, os.W_OK):
         ret = os.system(f'wget -O "{path}" "{url}" >/dev/null 2>&1')
         if ret == 0:
             return path

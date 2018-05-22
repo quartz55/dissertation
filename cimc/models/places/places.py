@@ -1,14 +1,14 @@
 import functools as f
 import time
 from enum import Enum
-from typing import List, Dict
+from typing import Dict
 
 import attr
 import numpy as np
 import torch
 from scipy.misc import imresize as imresize
 from torch.nn import functional as F
-from torchvision import transforms as tf
+from torchvision.transforms import transforms as tf
 
 import cimc.resources as resources
 import cimc.utils as utils
@@ -21,36 +21,12 @@ class SceneType(int, Enum):
     OUTDOOR = 1
 
 
-@attr.s(slots=True)
-class Attribute:
-    id: int = attr.ib()
-    name: str = attr.ib()
+category_pred_type = np.dtype([('id', np.int32),
+                               ('label', np.unicode, 40),
+                               ('confidence', np.float32)])
 
-
-@attr.s(slots=True)
-class CategoryPrediction:
-    id: int = attr.ib()
-    name: str = attr.ib()
-    confidence: float = attr.ib()
-
-
-@attr.s(slots=True, str=False)
-class PlacesClassification:
-    type: SceneType = attr.ib()
-    categories: List[CategoryPrediction] = attr.ib(factory=list)
-    attributes: List[Attribute] = attr.ib(factory=list)
-    timings: Dict[str, float] = attr.ib(factory=dict)
-
-    def __str__(self):
-        tmp = f"┌─PLACES CLASSIFICATION\n" \
-              f"├─TYPE: {self.type.name}\n" \
-              f"├─CATEGORIES:\n"
-        for cat in self.categories:
-            tmp += f"│   {cat.name}({cat.confidence*100:.2f}%)\n"
-        if len(self.attributes) > 0:
-            tmp += f"└─ATTRIBUTES:\n" \
-                   f"    {', '.join(sorted(self.attributes['label']))}"
-        return tmp
+attribute_pred_type = np.dtype([('id', np.int32),
+                                ('label', np.unicode, 40)])
 
 
 def returnCAM(feature_conv, weight_softmax, class_idx):
@@ -66,6 +42,25 @@ def returnCAM(feature_conv, weight_softmax, class_idx):
         cam_img = np.uint8(255 * cam_img)
         output_cam.append(imresize(cam_img, size_upsample))
     return output_cam
+
+
+@attr.s(slots=True, str=False)
+class PlacesClassification:
+    type: SceneType = attr.ib()
+    categories: np.ndarray = attr.ib(factory=lambda: np.empty(0, dtype=category_pred_type))
+    attributes: np.ndarray = attr.ib(factory=lambda: np.empty(0, dtype=attribute_pred_type))
+    timings: Dict[str, float] = attr.ib(factory=dict)
+
+    def __str__(self):
+        tmp = f"┌─PLACES CLASSIFICATION\n" \
+              f"├─TYPE: {self.type.name}\n" \
+              f"├─CATEGORIES:\n"
+        for cat in self.categories:
+            tmp += f"│   {cat['name']}({cat['confidence']*100:.2f}%)\n"
+        if len(self.attributes) > 0:
+            tmp += f"└─ATTRIBUTES:\n" \
+                   f"    {', '.join(sorted(self.attributes['label']))}"
+        return tmp
 
 
 class Places365(ResNet):
@@ -96,8 +91,9 @@ class Places365(ResNet):
         params = list(self.parameters())
         weight_softmax = params[-2].data.cpu().numpy()
         weight_softmax[weight_softmax < 0] = 0
+        curr_device = params[0].device if len(params) > 0 else utils.best_device
         t1 = time.time()
-        img_input = self.pre_process(img).unsqueeze(0).to(next(self.parameters()).device)
+        img_input = self.pre_process(img).unsqueeze(0).to(curr_device)
 
         with torch.no_grad():
             t2 = time.time()
@@ -105,19 +101,21 @@ class Places365(ResNet):
             t3 = time.time()
 
             h_x = F.softmax(logit, 1).data.squeeze()
-            probs, idx = h_x.sort(0, True)
-            probs, idx = probs.cpu().numpy(), idx.cpu().numpy()
+            probs_cats, cats_idx = h_x.sort(0, True)
+            probs_cats, cats_idx = probs_cats.cpu().numpy(), cats_idx.cpu().numpy()
+            top_5_cats = lbl.CATEGORIES[cats_idx[:5]]
 
-            io_image = np.mean(lbl.CATEGORIES['type'][idx[:10]])  # vote for the indoor or outdoor
+            io_image = np.mean(lbl.CATEGORIES[cats_idx[:10]]['type'])  # vote for the indoor or outdoor
             responses_attribute = lbl.ATTRIBUTES['weights'].dot(features['avgpool'])
-            idx_a = np.argsort(responses_attribute)
+            attrs_idx = np.argsort(responses_attribute)
+            top_10_attrs = lbl.ATTRIBUTES[attrs_idx[-1:-10:-1]]
             t4 = time.time()
 
             env_type = SceneType.INDOOR if io_image < 0.5 else SceneType.OUTDOOR
-            cats = [CategoryPrediction(i, cls, prob)
-                    for i, cls, prob in zip(idx[:5], lbl.CATEGORIES['label'][idx[:5]], probs[:5])]
-            attrs = [Attribute(id=id, label=label)
-                     for id, label in lbl.ATTRIBUTES[idx_a[-1:-10:-1]][['id', 'label']]]
+            categories = np.fromiter(((id, label, conf)
+                                      for (id, label), conf in zip(top_5_cats[['id', 'label']], probs_cats[:5])),
+                                     dtype=category_pred_type)
+            attributes = top_10_attrs[['id', 'label']].astype(attribute_pred_type)
             t5 = time.time()
             timings = {
                 'pre_process': t2 - t1,
@@ -126,7 +124,10 @@ class Places365(ResNet):
                 'result_creation': t5 - t4,
                 'total': t5 - t1
             }
-            result = PlacesClassification(env_type, cats, attrs, timings)
+            result = PlacesClassification(type=env_type,
+                                          categories=categories,
+                                          attributes=attributes,
+                                          timings=timings)
             for h in hooks.values():
                 h.remove()
             return result
@@ -134,7 +135,7 @@ class Places365(ResNet):
     @classmethod
     def pre_trained(cls, model_file: str = None):
         if model_file is None:
-            model_file = resources.weight("widerestnet18_places365.pth.tar")
+            model_file = resources.weight("wideresnet18_places365.pth.tar")
         utils.simple_download('http://places2.csail.mit.edu/models_places365/wideresnet18_places365.pth.tar',
                               model_file)
         m = cls()
@@ -161,14 +162,6 @@ def main():
     print(f"{avg_time*1e3:.4f}ms")
     print(res)
     print(res.timings)
-    # generate class activation mapping (CAM)
-    # print('Class activation map is saved as cam.jpg')
-    # CAMs = returnCAM(features_blobs[0], weight_softmax, [idx[0]])
-    # img = cv2.imread('test.jpg')
-    # height, width, _ = img.shape
-    # heatmap = cv2.applyColorMap(cv2.resize(CAMs[0], (width, height)), cv2.COLORMAP_JET)
-    # result = heatmap * 0.4 + img * 0.5
-    # cv2.imwrite('cam.jpg', result)
 
 
 if __name__ == '__main__':

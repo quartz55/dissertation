@@ -233,7 +233,7 @@ class MultiTracker:
         self.curr_frame = 0
         self.trackers: Dict[int, Tracker] = {}
 
-    def update(self, bboxes):
+    def update(self, bboxes) -> List[TrackedBoundingBox]:
         per_class = {cls: [] for cls in self.trackers}
         for bbox in bboxes:
             if bbox.class_id in per_class:

@@ -121,8 +121,7 @@ def draw_tracked(image: Image.Image, tracked: List[TrackedBoundingBox],
     if class_colors is None:
         class_colors = {}
     w, h = image.width, image.height
-    result = image.copy()
-    draw = ImageDraw.Draw(result)
+    draw = ImageDraw.Draw(image)
     for box in tracked:
         label = class_colors.get(box.class_id, ClassLabel(color=(32, 32, 32)))
         thick = 2
@@ -152,7 +151,7 @@ def draw_tracked(image: Image.Image, tracked: List[TrackedBoundingBox],
                            fill=label.color)
             draw.text(tuple(top_left + Point(pad, pad)),
                       text, fill='white', font=font_bold)
-    return result
+    return image
 
 
 class VideoDetections:
@@ -171,7 +170,7 @@ class VideoDetections:
                       unit='frame',
                       dynamic_ncols=True) as bar:
                 for frame in bar:
-                    boxes = net.detect_image(Image.fromarray(frame))[0]
+                    boxes = net.detect(Image.fromarray(frame))[0]
                     bboxes = [pp(box) for box in boxes]
                     self.detections.append(bboxes)
 

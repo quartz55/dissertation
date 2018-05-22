@@ -51,6 +51,3 @@ def _load_labels():
 
 
 _load_labels()
-
-if __name__ == '__main__':
-    pass
