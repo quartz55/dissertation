@@ -1,3 +1,5 @@
+import functools as f
+import operator as op
 from typing import Tuple, List
 
 import attr
@@ -97,8 +99,10 @@ def draw_video_classification(video_uri: str, segments):
                         curr_overlay = scene_class_overlay(frame, curr_segment['classification'])
                     rel_frame_idx = i - curr_segment['start']
                     out_img = Image.fromarray(frame)
+                    objects = curr_segment['objects'][rel_frame_idx]
+                    objects = f.reduce(op.concat, objects.values())
                     out_img = draw_tracked(out_img,
-                                           curr_segment['objects'][rel_frame_idx],
+                                           objects,
                                            class_colors)
                     out_img.paste(curr_overlay, mask=curr_overlay)
                     out.append_data(np.array(out_img))
