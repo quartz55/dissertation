@@ -1,16 +1,15 @@
 name: cimc
 channels:
-  - pytorch
   - defaults
 dependencies:
   - pkgs/main::python=3.6
   - pkgs/main::pip
   - pytorch::pytorch
-  # - pytorch::cuda91
+  - pytorch::cuda91
   - pytorch::torchvision
   - numpy
   - numba
-  - conda-forge::av
+  # - conda-forge::av
   - pip:
     - git+https://github.com/Breakthrough/PySceneDetect@master#egg=PySceneDetect
 #    - git+https://gitlab.com/EAVISE/brambox@master#egg=brambox

@@ -1,5 +1,7 @@
 import functools as f
 import operator as op
+import os
+import pickle
 from typing import Tuple, List
 
 import attr
@@ -100,7 +102,7 @@ def draw_video_classification(video_uri: str, segments):
                     rel_frame_idx = i - curr_segment['start']
                     out_img = Image.fromarray(frame)
                     objects = curr_segment['objects'][rel_frame_idx]
-                    objects = f.reduce(op.concat, objects.values())
+                    objects = f.reduce(op.concat, objects.values(), [])
                     out_img = draw_tracked(out_img,
                                            objects,
                                            class_colors)
@@ -132,5 +134,12 @@ def scene_class_overlay(frame: np.ndarray, classification: SceneClassification) 
 
 if __name__ == '__main__':
     video_uri = resources.video('goldeneye.mp4')
-    segments = classify_video(video_uri)
+    class_uri = video_uri + '.class'
+    if os.path.isfile(class_uri):
+        with open(class_uri, 'rb') as fd:
+            segments = pickle.load(fd)
+    else:
+        segments = classify_video(video_uri)
+        with open(class_uri, 'wb') as fd:
+            pickle.dump(segments, fd)
     draw_video_classification(video_uri, segments)

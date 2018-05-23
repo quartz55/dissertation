@@ -82,28 +82,24 @@ def nms(boxes, nms_thresh):
     return out_boxes
 
 
-def x1y1x2y2(box):
-    x1 = box[0] - box[2] / 2.
-    y1 = box[1] - box[3] / 2.
-    x2 = box[0] + box[2] / 2.
-    y2 = box[1] + box[3] / 2.
-    return x1, y1, x2, y2
-
-
 def bbox_iou(box1, box2):
-    b1_x1, b1_y1, b1_x2, b1_y2 = x1y1x2y2(box1)
-    b2_x1, b2_y1, b2_x2, b2_y2 = x1y1x2y2(box2)
-    i_x1 = torch.max(b1_x1, b2_x1)
-    i_y1 = torch.max(b1_y1, b2_y1)
-    i_x2 = torch.max(b1_x2, b2_x2)
-    i_y2 = torch.max(b1_y2, b2_y2)
+    min_x = min(box1[0] - box1[2] / 2.0, box2[0] - box2[2] / 2.0)
+    max_x = max(box1[0] + box1[2] / 2.0, box2[0] + box2[2] / 2.0)
+    min_y = min(box1[1] - box1[3] / 2.0, box2[1] - box2[3] / 2.0)
+    max_y = max(box1[1] + box1[3] / 2.0, box2[1] + box2[3] / 2.0)
+    w1 = box1[2]
+    h1 = box1[3]
+    w2 = box2[2]
+    h2 = box2[3]
+    u_width = max_x - min_x
+    u_height = max_y - min_y
+    c_width = w1 + w2 - u_width
+    c_height = h1 + h2 - u_height
+    if c_width <= 0 or c_height <= 0:
+        return 0.0
 
-    i_area = torch.clamp(i_x2 - i_x1 + 1, min=0) * torch.clamp(i_y2 - i_y1 + 1, min=0)
-    if i_area == 0:
-        return 0.
-
-    w1, h1 = box1[2], box1[3]
-    w2, h2 = box2[2], box2[3]
-    b1_area = w1 * h1
-    b2_area = w2 * h2
-    return i_area / (b1_area + b2_area - i_area)
+    area1 = w1 * h1
+    area2 = w2 * h2
+    c_area = c_width * c_height
+    u_area = area1 + area2 - c_area
+    return c_area / u_area
