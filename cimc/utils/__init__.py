@@ -1,3 +1,4 @@
+import datetime
 import os
 from typing import Union
 
@@ -41,3 +42,7 @@ def simple_download(url: str, out: str = None, dir: str = None, force: bool = Fa
             return path
         raise EnvironmentError('System has no available downloader')
     return path
+
+
+def duration_str(seconds: float):
+    return str(datetime.timedelta(seconds=seconds))

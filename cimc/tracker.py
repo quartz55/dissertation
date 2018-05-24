@@ -220,7 +220,8 @@ class Tracker:
             # if tracker.hits >= self.min_hits or self.curr_frame <= self.min_hits:
             #     ret.append(TrackedBoundingBox.from_bbox(tracker.bbox(), tracker.id))
 
-            if tracker.hits >= self.min_hits:
+            if (tracker.hits >= self.min_hits
+                    or tracker.hit_streak >= 3):
                 ret.append(TrackedBoundingBox.from_bbox(tracker.bbox(), tracker.id))
         return ret
 
@@ -233,7 +234,7 @@ class MultiTracker:
         self.curr_frame = 0
         self.trackers: Dict[int, Tracker] = {}
 
-    def update(self, bboxes) -> List[TrackedBoundingBox]:
+    def update(self, bboxes) -> Dict[int, List[TrackedBoundingBox]]:
         per_class = {cls: [] for cls in self.trackers}
         for bbox in bboxes:
             if bbox.class_id in per_class:
