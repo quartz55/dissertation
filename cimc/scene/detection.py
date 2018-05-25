@@ -1,10 +1,8 @@
 import time
 
 import cv2
-import numba as nb
 import numpy as np
 import torch
-from numba import jit
 
 from cimc import resources
 
@@ -116,6 +114,8 @@ class SceneDetector:
                 f2 = self.downscale(frame, self.downscale_factor)
                 t1 = time.time()
                 cut = is_cut(np.array([f1, f2]), self.threshold)
+                if cut:
+                    self._last_scene = self._curr_id
                 self._timings.append(time.time() - t1)
             self._last_frame = frame
         self._curr_id += 1
@@ -171,14 +171,15 @@ def test_rgb2hsv():
 
 
 def test_detector():
+    from itertools import cycle
     sample = np.ones((10, 10, 3), np.uint8)
     scene_1 = (sample * [255, 0, 0]).astype(np.uint8)
     scene_2 = (sample * [0, 255, 0]).astype(np.uint8)
     scene_3 = (sample * [0, 0, 255]).astype(np.uint8)
     detector = SceneDetector(threshold=5)
     assert detector.update(scene_1), "First frame should always be a new scene"
-    for _ in range(detector.min_length - 1):
-        assert not detector.update(scene_2), "No scene cuts if in min length"
+    for _, scene in zip(range(detector.min_length - 1), cycle([scene_2, scene_1])):
+        assert detector.update(scene), "No scene cuts if in min length"
     assert detector._curr_id == detector.min_length
     assert detector.update(scene_3), "Should detect after min length"
 

@@ -38,7 +38,6 @@ class SceneClassifier:
             places_net = Places365.pre_trained().to(utils.best_device)
         self.places_net = places_net
         self._step = step
-        self._curr_frame = 0
         self._next_frame = 0
         self._frames_read = 0
         self._results = []
@@ -47,7 +46,7 @@ class SceneClassifier:
 
     def update(self, frame: np.ndarray):
         self._frames_read += 1
-        if self._curr_frame != self._next_frame:
+        if self._frames_read - 1 < self._next_frame:
             return
         res = self.places_net.classify(frame)
         self._probs_cats[res.categories['id']] += res.categories['confidence']
@@ -80,7 +79,7 @@ class SceneClassifier:
         return result
 
     def reset(self):
-        self._curr_frame = 0
+        self._frames_read = 0
         self._next_frame = 0
         self._results = []
         self._probs_cats = np.zeros(len(lbl.CATEGORIES))

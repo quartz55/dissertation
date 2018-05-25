@@ -4,7 +4,7 @@ import operator as op
 import os
 import pickle
 import time
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 
 import imageio
 import numpy as np
@@ -72,9 +72,9 @@ def classify_video(video_uri: str):
                                f"is invalid. YOLOv3 will be used")
 
         scene_detector = SceneDetector(downscale=4,
-                                       min_length=int(fps * 2))
+                                       min_length=int(fps))
 
-        scene_classifier = SceneClassifier(step=int(1 * fps))
+        scene_classifier = SceneClassifier(step=int(fps / 2))
 
         yolov3_net: Optional[YoloV3] = None
         if gen_detections:
@@ -98,9 +98,9 @@ def classify_video(video_uri: str):
                         segment.end = i
                         segment.scene = scene_classifier.classification()
                         segments.append(segment)
-                        scene_classifier.reset()
-                        tracker.reset()
                     segment = Segment(start=i)
+                    scene_classifier.reset()
+                    tracker.reset()
                 scene_classifier.update(frame)
                 if gen_detections:
                     bboxes = [pp(box) for box in yolov3_net.detect(frame)[0]]
@@ -133,7 +133,7 @@ def draw_video_classification(video_uri: str, segments):
         out_uri, ext = os.path.splitext(video_uri)
         out_uri = f"{out_uri}-classification{ext}"
         out: imageio.core.Format.Writer
-        with imageio.get_writer(out_uri, fps=fps, quality=5) as out:
+        with imageio.get_writer(out_uri, fps=fps, quality=5, macro_block_size=2) as out:
             with tqdm(total=length,
                       desc=f"Drawing classification for '{video_uri}'",
                       unit='frame') as bar:
@@ -147,7 +147,9 @@ def draw_video_classification(video_uri: str, segments):
                         curr_segment = next(seg_iter)
                         curr_overlay = None
                     if curr_overlay is None:
-                        curr_overlay = scene_class_overlay(frame, curr_segment.scene)
+                        curr_overlay = scene_class_overlay(frame,
+                                                           (curr_segment.start, curr_segment.end),
+                                                           curr_segment.scene)
                     rel_frame_idx = i - curr_segment.start
                     out_img = Image.fromarray(frame)
                     objects = curr_segment.objects[rel_frame_idx]
@@ -157,17 +159,24 @@ def draw_video_classification(video_uri: str, segments):
                                            class_colors)
                     out_img.paste(curr_overlay, mask=curr_overlay)
                     out_img = np.array(out_img)
-                    if curr_segment.start == i:
-                        out_img[-40:, -40] = [255, 0, 0]
+                    start, end = curr_segment.start, curr_segment.end
+                    scene_change_bleep_duration = min(int(fps / 2), end - start)
+                    if i <= curr_segment.start < i + scene_change_bleep_duration:
+                        out_img[-40:, -40:] = [255, 0, 0]
                     out.append_data(out_img)
 
 
 font = ImageFont.truetype(resources.font('DejaVuSans-Bold.ttf'), 10)
 
 
-def scene_class_overlay(frame: np.ndarray, classification: SceneClassification) -> Image:
+def scene_class_overlay(frame: np.ndarray,
+                        frame_range: Tuple[int, int],
+                        classification: SceneClassification) -> Image:
     h, w = frame.shape[:2]
-    text = f"Type: {classification.type.name}\n" \
+    start, end = frame_range
+    length, n_measures = classification.length, classification.num_measures
+    text = f"({start}-{end}) {end-start} frames ({length} read, {n_measures} measured)\n" \
+           f"Type: {classification.type.name}\n" \
            f"Categories:\n"
     for cat in classification.categories:
         text += f"  - {cat.label}({cat.confidence*100:.2f}%)\n"
@@ -201,7 +210,15 @@ def main(video_uri=None):
 
 
 if __name__ == '__main__':
+    try:
+        with open(resources.video('justice-league.mp4.clsf'), 'rb') as fd:
+            clsf = pickle.load(fd)
+            pass
+    except:
+        pass
     # main(resources.video('Venice-1.mp4'))
-    main(resources.video('goldeneye.mp4'))
-    main(resources.video('bvs.mp4'))
+    # main(resources.video('goldeneye.mp4'))
+    # main(resources.video('bvs.mp4'))
     main(resources.video('justice-league.mp4'))
+    # main(resources.video('deadpool2.mp4'))
+    # main(resources.video('ant-man-and-wasp.mp4'))
