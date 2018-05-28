@@ -216,9 +216,9 @@ if __name__ == '__main__':
             pass
     except:
         pass
-    # main(resources.video('Venice-1.mp4'))
+    main(resources.video('Venice-1.mp4'))
     # main(resources.video('goldeneye.mp4'))
     # main(resources.video('bvs.mp4'))
-    main(resources.video('justice-league.mp4'))
+    # main(resources.video('justice-league.mp4'))
     # main(resources.video('deadpool2.mp4'))
     # main(resources.video('ant-man-and-wasp.mp4'))

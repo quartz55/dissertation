@@ -136,8 +136,10 @@ class Places365(ResNet):
     def pre_trained(cls, model_file: str = None):
         if model_file is None:
             model_file = resources.weight("wideresnet18_places365.pth.tar")
-        utils.simple_download('http://places2.csail.mit.edu/models_places365/wideresnet18_places365.pth.tar',
-                              model_file)
+        # utils.simple_download('http://places2.csail.mit.edu/models_places365/wideresnet18_places365.pth.tar',
+        #                       model_file)
+        utils.downloader.download_sync('http://places2.csail.mit.edu/models_places365/wideresnet18_places365.pth.tar',
+                                       model_file)
         m = cls()
         checkpoint = torch.load(model_file, map_location=lambda st, loc: st)
         m.load_state_dict({str.replace(k, 'module.', ''): v

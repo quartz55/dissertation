@@ -54,8 +54,10 @@ class YoloV3(darknet.Darknet):
     def pre_trained(cls, weights_file: str = None):
         if weights_file is None:
             weights_file = resources.weight('yolov3.weights')
-        utils.simple_download(YOLOV3_WEIGHTS_URL,
-                              weights_file)
+        utils.downloader.download_sync(YOLOV3_WEIGHTS_URL,
+                                       weights_file)
+        # utils.simple_download(YOLOV3_WEIGHTS_URL,
+        #                       weights_file)
         net = cls()
         net.load_weights(weights_file)
         return net

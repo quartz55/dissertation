@@ -6,6 +6,8 @@ import numpy as np
 import torch
 from PIL import Image
 
+from . import downloader
+
 ImageType = Union[str, np.ndarray, Image.Image]
 
 best_device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
