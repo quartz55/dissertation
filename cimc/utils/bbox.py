@@ -3,7 +3,7 @@ from typing import Optional, Tuple, List
 import numpy as np
 from numba import njit, double
 
-from cimc.core.vec import Vec2
+from cimc.utils.vec import Vec2
 
 
 class Point(Vec2):

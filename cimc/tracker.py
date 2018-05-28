@@ -5,7 +5,7 @@ import numpy as np
 from filterpy.kalman import KalmanFilter
 from sklearn.utils.linear_assignment_ import linear_assignment
 
-from cimc.core.bbox import BoundingBox, Point
+from cimc.utils.bbox import BoundingBox, Point
 
 
 class TrackedBoundingBox(BoundingBox):

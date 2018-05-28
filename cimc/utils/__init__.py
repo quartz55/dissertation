@@ -7,6 +7,11 @@ import torch
 from PIL import Image
 
 from . import downloader
+from . import bbox
+from . import log
+from . import vec
+from .bbox import BoundingBox
+from .vec import Vec
 
 ImageType = Union[str, np.ndarray, Image.Image]
 

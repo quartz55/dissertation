@@ -4,7 +4,7 @@ import operator as op
 import os
 import pickle
 import time
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict
 
 import imageio
 import numpy as np
@@ -13,12 +13,12 @@ from torchvision.transforms import transforms as tf
 from tqdm import tqdm
 
 from cimc import resources, utils
-from cimc.core import bbox, log
 from cimc.models import YoloV3
-from cimc.models.labels import COCO_LABELS
+from cimc.models.yolov3.labels import COCO_LABELS
 from cimc.scene import SceneDetector
 from cimc.scene.classification import SceneClassifier, SceneClassification
 from cimc.tracker import TrackedBoundingBox, MultiTracker
+from cimc.utils import bbox, log
 from yolo_test import make_class_labels, draw_tracked
 
 logger = logging.getLogger(__name__)
@@ -27,9 +27,10 @@ logger.setLevel(logging.DEBUG)
 
 
 class Segment:
-    __slots__ = ['start', 'end', 'scene', 'objects']
+    __slots__ = ['id', 'start', 'end', 'scene', 'objects']
 
-    def __init__(self, start: int):
+    def __init__(self, id: int, start: int):
+        self.id = id
         self.start = start
         self.end: Optional[int] = None
         self.scene: Optional[SceneClassification] = None
@@ -44,7 +45,26 @@ class Segment:
         self.objects.append(objects)
 
 
-def classify_video(video_uri: str):
+class VideoClassification:
+    def __init__(self, filename: str,
+                 segments: List[Segment],
+                 length: int = 0,
+                 fps: float = 0,
+                 name: str = None):
+        filename = os.path.basename(filename)
+        if name is None:
+            name = os.path.splitext(filename)[0]
+        self.filename = filename
+        self.name = name
+        self.fps = fps
+        self.length = length
+        self.segments = segments
+
+    def __iter__(self):
+        return iter(self.segments)
+
+
+def classify_video(video_uri: str) -> VideoClassification:
     logger.info(f"Starting classification for video '{video_uri}'")
     segments: List[Segment] = []
     video: imageio.core.Format.Reader
@@ -58,7 +78,7 @@ def classify_video(video_uri: str):
         logger.info(f"'{os.path.basename(video_uri)}' : "
                     f"{size[0]}x{size[1]} {duration}({fps}fps {length} frames)")
 
-        detections_uri = os.path.splitext(video_uri)[0] + '.dets'
+        detections_uri = f"{video_uri}.dets"
         detections: List[List[bbox.BoundingBox]] = []
         gen_detections = True
         if os.path.isfile(detections_uri):
@@ -98,7 +118,7 @@ def classify_video(video_uri: str):
                         segment.end = i
                         segment.scene = scene_classifier.classification()
                         segments.append(segment)
-                    segment = Segment(start=i)
+                    segment = Segment(id=len(segments), start=i)
                     scene_classifier.reset()
                     tracker.reset()
                 scene_classifier.update(frame)
@@ -121,24 +141,25 @@ def classify_video(video_uri: str):
 
         time_taken = utils.duration_str(t_end - t_start)
         logger.info(f"Finished classifying '{video_uri}' in {time_taken} (found {len(segments)} scenes)")
-    return segments
+        clsf = VideoClassification(video_uri, segments, length, fps)
+        return clsf
 
 
-def draw_video_classification(video_uri: str, segments):
+def annotate_video(video_uri: str, clsf: VideoClassification):
     import os.path
     video: imageio.core.Format.Reader
     with imageio.get_reader(video_uri) as video:
         fps = video.get_meta_data()['fps']
         length = len(video)
         out_uri, ext = os.path.splitext(video_uri)
-        out_uri = f"{out_uri}-classification{ext}"
+        out_uri = f"{out_uri}.annotated.mp4"
         out: imageio.core.Format.Writer
         with imageio.get_writer(out_uri, fps=fps, quality=5, macro_block_size=2) as out:
             with tqdm(total=length,
                       desc=f"Drawing classification for '{video_uri}'",
                       unit='frame') as bar:
                 class_colors = make_class_labels(COCO_LABELS)
-                seg_iter = iter(segments)
+                seg_iter = iter(clsf)
                 curr_segment: Segment = next(seg_iter)
                 curr_overlay: Image.Image = None
                 for i, frame in enumerate(video):
@@ -147,9 +168,7 @@ def draw_video_classification(video_uri: str, segments):
                         curr_segment = next(seg_iter)
                         curr_overlay = None
                     if curr_overlay is None:
-                        curr_overlay = scene_class_overlay(frame,
-                                                           (curr_segment.start, curr_segment.end),
-                                                           curr_segment.scene)
+                        curr_overlay = scene_class_overlay(frame, curr_segment)
                     rel_frame_idx = i - curr_segment.start
                     out_img = Image.fromarray(frame)
                     objects = curr_segment.objects[rel_frame_idx]
@@ -170,24 +189,27 @@ font = ImageFont.truetype(resources.font('DejaVuSans-Bold.ttf'), 10)
 
 
 def scene_class_overlay(frame: np.ndarray,
-                        frame_range: Tuple[int, int],
-                        classification: SceneClassification) -> Image:
+                        segment: Segment) -> Image:
     h, w = frame.shape[:2]
-    start, end = frame_range
-    length, n_measures = classification.length, classification.num_measures
-    text = f"({start}-{end}) {end-start} frames ({length} read, {n_measures} measured)\n" \
-           f"Type: {classification.type.name}\n" \
+    start, end = segment.start, segment.end
+    scene = segment.scene
+    length, n_measures = scene.length, scene.num_measures
+
+    text = f"Segment: {segment.id}({start}-{end}) {end-start} frames({length} read, {n_measures} measured)\n" \
+           f"Type: {scene.type.name}\n" \
            f"Categories:\n"
-    for cat in classification.categories:
+    for cat in scene.categories:
         text += f"  - {cat.label}({cat.confidence*100:.2f}%)\n"
     text += f"Attributes:\n"
-    for attr in classification.attributes:
+    for attr in scene.attributes:
         text += f"  - {attr.label}\n"
+
     overlay = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
     lines = text.splitlines()
     max_line_width = max((len(line) for line in lines))
     txt_w, txt_h = max_line_width * 7, len(lines) * 15
-    draw = ImageDraw.Draw(overlay)
     draw.rectangle([0, 0, txt_w, txt_h], fill=(0, 0, 0, 100))
     draw.text((10, 10), text, font=font, fill=(255, 255, 255, 255))
     return overlay
@@ -206,19 +228,23 @@ def main(video_uri=None):
         with open(clsf_uri, 'wb') as fd:
             pickle.dump(segments, fd)
             logger.info(f"Saved classification to '{clsf_uri}'")
-    draw_video_classification(video_uri, segments)
+    annotate_video(video_uri, segments)
 
 
 if __name__ == '__main__':
-    try:
-        with open(resources.video('justice-league.mp4.clsf'), 'rb') as fd:
-            clsf = pickle.load(fd)
-            pass
-    except:
-        pass
-    main(resources.video('Venice-1.mp4'))
-    # main(resources.video('goldeneye.mp4'))
-    # main(resources.video('bvs.mp4'))
+    # try:
+    #     with open(resources.video('justice-league.mp4.clsf'), 'rb') as fd:
+    #         clsf = pickle.load(fd)
+    #         pass
+    # except:
+    #     pass
+    main(resources.video('TUD-Campus.var.rotate-scale.mp4'))
+    # main(resources.video('TUD-Campus.mp4'))
+    # main(resources.video('TUD-Crossing.mp4'))
+    # main(resources.video('ADL-Rundle-8.mp4'))
+    # main(resources.video('Venice-1.mp4'))
     # main(resources.video('justice-league.mp4'))
     # main(resources.video('deadpool2.mp4'))
     # main(resources.video('ant-man-and-wasp.mp4'))
+    # main(resources.video('bvs.mp4'))
+    # main(resources.video('goldeneye.mp4'))

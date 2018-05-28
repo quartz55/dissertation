@@ -12,7 +12,7 @@ import psutil
 from aiostream import stream
 from tqdm import tqdm
 
-from cimc.core import log
+from cimc.utils import log
 
 WEIGHTS = {
     # 'https://pjreddie.com/media/files/yolov2.weights': 'yolov2.weights',

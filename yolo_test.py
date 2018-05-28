@@ -11,11 +11,11 @@ from PIL import Image, ImageDraw, ImageFont, ImageColor
 from torchvision import transforms
 from tqdm import tqdm
 
-import cimc.core.bbox as bbox
+import cimc.utils.bbox as bbox
 import cimc.resources as resources
 from cimc import utils
-from cimc.core.bbox import BoundingBox, Point
-from cimc.models.labels import COCO_LABELS
+from cimc.utils.bbox import BoundingBox, Point
+from cimc.models.yolov3.labels import COCO_LABELS
 from cimc.models.yolov3 import YoloV3
 from cimc.tracker import TrackedBoundingBox, MultiTracker
 
