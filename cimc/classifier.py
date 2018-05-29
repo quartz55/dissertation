@@ -4,11 +4,12 @@ import operator as op
 import os
 import pickle
 import time
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any, Tuple
 
 import imageio
 import numpy as np
 from PIL import Image, ImageFont, ImageDraw
+from imageio.core import Format
 from torchvision.transforms import transforms as tf
 from tqdm import tqdm
 
@@ -26,39 +27,96 @@ logger.addHandler(log.TqdmLoggingHandler())
 logger.setLevel(logging.DEBUG)
 
 
-class Segment:
+class VideoMetaMixin:
+    _metadata: Dict[str, Any] = {
+        "fps": 0.0,
+        "size": (0, 0)
+    }
+
+    @property
+    def metadata(self):
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, meta: Dict[str, Any]):
+        assert isinstance(meta, dict)
+        assert {"fps", "size"}.issubset(meta.keys())
+        self._metadata = meta
+
+    @property
+    def fps(self) -> float:
+        return self.metadata['fps']
+
+    @property
+    def length(self) -> int:
+        return self.metadata['nframes']
+
+    @property
+    def duration(self) -> float:
+        return self.metadata['duration'] or self.length / self.fps
+
+    @property
+    def size(self) -> Tuple[int, int]:
+        return self.metadata['size']
+
+    @property
+    def shape(self) -> Tuple[int, int, int]:
+        w, h = self.size
+        return h, w, 3
+
+
+class Segment(VideoMetaMixin):
     __slots__ = ['id', 'start', 'end', 'scene', 'objects']
 
-    def __init__(self, id: int, start: int):
+    def __init__(self, id: int, start: int, metadata: Dict[str, Any] = None):
         self.id = id
         self.start = start
         self.end: Optional[int] = None
         self.scene: Optional[SceneClassification] = None
         self.objects: List[Dict[int, List[TrackedBoundingBox]]] = []
+        if metadata is not None:
+            self.metadata = metadata
 
     def __len__(self):
         if self.end is None:
             raise ValueError("Segment has no 'end' frame")
         return self.end - self.start
 
-    def add_objects(self, objects: Dict[int, List[TrackedBoundingBox]]):
+    def append_objects(self, objects: Dict[int, List[TrackedBoundingBox]]):
         self.objects.append(objects)
 
 
-class VideoClassification:
-    def __init__(self, filename: str,
-                 segments: List[Segment],
-                 length: int = 0,
-                 fps: float = 0,
-                 name: str = None):
-        filename = os.path.basename(filename)
+class VideoClassification(VideoMetaMixin):
+    __slots__ = ['filename', 'name', 'segments']
+
+    def __init__(self, file_uri: str,
+                 segments: List[Segment] = None,
+                 name: str = None,
+                 metadata: Dict[str, Any] = None,
+                 reader: Format.Reader = None):
+        self.segments = [] if segments is None else segments
+
+        self.filename = os.path.basename(file_uri)
+
         if name is None:
-            name = os.path.splitext(filename)[0]
-        self.filename = filename
+            name = os.path.splitext(self.filename)[0]
         self.name = name
-        self.fps = fps
-        self.length = length
-        self.segments = segments
+
+        if metadata is None:
+            if reader is None and os.path.isfile(file_uri):
+                try:
+                    with imageio.get_reader(file_uri) as reader:  # type: Format.Reader
+                        metadata = reader.get_meta_data()
+                except (ValueError, RuntimeError):
+                    pass
+            elif reader is not None:
+                metadata = reader.get_meta_data()
+        assert metadata is not None, "Couldn't get metadata"
+        self.metadata = metadata
+
+    def append_segment(self, segment: Segment):
+        segment.metadata = self.metadata
+        self.segments.append(segment)
 
     def __iter__(self):
         return iter(self.segments)
@@ -66,9 +124,8 @@ class VideoClassification:
 
 def classify_video(video_uri: str) -> VideoClassification:
     logger.info(f"Starting classification for video '{video_uri}'")
-    segments: List[Segment] = []
-    video: imageio.core.Format.Reader
-    with imageio.get_reader(video_uri) as video:
+
+    with imageio.get_reader(video_uri) as video:  # type: Format.Reader
         meta = video.get_meta_data()
         size = meta['size']
         fps = meta['fps']
@@ -101,10 +158,12 @@ def classify_video(video_uri: str) -> VideoClassification:
             yolov3_net = YoloV3.pre_trained().to(utils.best_device)
             pp = tf.Compose([bbox.ReverseScale(size[0], size[1]),
                              bbox.FromYoloOutput(COCO_LABELS)])
+
         tracker = MultiTracker(max_age=int(fps),
                                min_hits=int(fps / 2),
                                iou_thres=0.35)
 
+        clsf = VideoClassification(video_uri, metadata=meta)
         t_start = time.time()
         with tqdm(total=length,
                   desc=f"Classifying '{video_uri}'",
@@ -117,21 +176,25 @@ def classify_video(video_uri: str) -> VideoClassification:
                     if segment is not None:
                         segment.end = i
                         segment.scene = scene_classifier.classification()
-                        segments.append(segment)
-                    segment = Segment(id=len(segments), start=i)
+                        clsf.append_segment(segment)
+                    segment = Segment(id=len(clsf.segments), start=i)
                     scene_classifier.reset()
                     tracker.reset()
+
                 scene_classifier.update(frame)
+
                 if gen_detections:
                     bboxes = [pp(box) for box in yolov3_net.detect(frame)[0]]
                     detections.append(bboxes)
                 else:
                     bboxes = detections[i]
                 objects = tracker.update(bboxes)
-                segment.add_objects(objects)
+                segment.append_objects(objects)
+
             segment.end = length
             segment.scene = scene_classifier.classification()
-            segments.append(segment)
+            clsf.append_segment(segment)
+
         t_end = time.time()
 
         if gen_detections:
@@ -140,21 +203,22 @@ def classify_video(video_uri: str) -> VideoClassification:
             logger.debug(f"Saved YOLOv3 detections as '{detections_uri}'")
 
         time_taken = utils.duration_str(t_end - t_start)
-        logger.info(f"Finished classifying '{video_uri}' in {time_taken} (found {len(segments)} scenes)")
-        clsf = VideoClassification(video_uri, segments, length, fps)
+        logger.info(f"Finished classifying '{video_uri}' in {time_taken} (found {len(clsf.segments)} scenes)")
+
         return clsf
 
 
 def annotate_video(video_uri: str, clsf: VideoClassification):
     import os.path
-    video: imageio.core.Format.Reader
-    with imageio.get_reader(video_uri) as video:
+    with imageio.get_reader(video_uri) as video:  # type: Format.Reader
         fps = video.get_meta_data()['fps']
         length = len(video)
         out_uri, ext = os.path.splitext(video_uri)
         out_uri = f"{out_uri}.annotated.mp4"
-        out: imageio.core.Format.Writer
-        with imageio.get_writer(out_uri, fps=fps, quality=5, macro_block_size=2) as out:
+        with imageio.get_writer(out_uri,
+                                fps=fps,
+                                quality=5,
+                                macro_block_size=2) as out:  # type: Format.Writer
             with tqdm(total=length,
                       desc=f"Drawing classification for '{video_uri}'",
                       unit='frame') as bar:
@@ -215,20 +279,47 @@ def scene_class_overlay(frame: np.ndarray,
     return overlay
 
 
-def main(video_uri=None):
+def load_clsf(clsf_uri: str) -> Optional[VideoClassification]:
+    try:
+        with open(clsf_uri, 'rb') as fd:
+            return pickle.load(fd)
+    except pickle.PickleError as e:
+        return None
+
+
+def get_clsf(clsf_uri: str = None, video_uri: str = None) -> VideoClassification:
+    clsf: VideoClassification = None
+    if clsf_uri is not None:
+        if not os.path.isfile(clsf_uri):
+            logger.warning(f"Provided clsf uri doesn't exist: {clsf_uri}")
+        else:
+            clsf = load_clsf(clsf_uri)
+            if clsf is not None:
+                logger.info(f"Loaded clsf: {clsf_uri}")
+            else:
+                logger.warning(f"Invalid clsf provided: {clsf_uri}")
+    if clsf is None:
+        clsf_uri = f"{video_uri}.clsf"
+        if os.path.isfile(clsf_uri):
+            clsf = load_clsf(clsf_uri)
+            if clsf is not None:
+                logger.info(f"Found and loaded existing clsf: {clsf_uri}")
+        if clsf is None:
+            if video_uri is None or not os.path.isfile(video_uri):
+                raise FileNotFoundError(video_uri)
+            clsf = classify_video(video_uri)
+            with open(clsf_uri, 'wb') as fd:
+                pickle.dump(clsf, fd)
+                logger.info(f"Saved classification to '{clsf_uri}'")
+    return clsf
+
+
+def classify_and_annotate(video_uri=None, clsf_uri=None):
     if video_uri is None:
         video_uri = resources.video('goldeneye.mp4')
-    clsf_uri = video_uri + '.clsf'
-    if os.path.isfile(clsf_uri):
-        with open(clsf_uri, 'rb') as fd:
-            segments = pickle.load(fd)
-            logger.info(f"Loaded existing classification from '{clsf_uri}'")
-    else:
-        segments = classify_video(video_uri)
-        with open(clsf_uri, 'wb') as fd:
-            pickle.dump(segments, fd)
-            logger.info(f"Saved classification to '{clsf_uri}'")
-    annotate_video(video_uri, segments)
+
+    clsf = get_clsf(clsf_uri, video_uri)
+    annotate_video(video_uri, clsf)
 
 
 if __name__ == '__main__':
@@ -238,13 +329,17 @@ if __name__ == '__main__':
     #         pass
     # except:
     #     pass
-    main(resources.video('TUD-Campus.var.rotate-scale.mp4'))
-    # main(resources.video('TUD-Campus.mp4'))
-    # main(resources.video('TUD-Crossing.mp4'))
-    # main(resources.video('ADL-Rundle-8.mp4'))
-    # main(resources.video('Venice-1.mp4'))
-    # main(resources.video('justice-league.mp4'))
-    # main(resources.video('deadpool2.mp4'))
-    # main(resources.video('ant-man-and-wasp.mp4'))
-    # main(resources.video('bvs.mp4'))
-    # main(resources.video('goldeneye.mp4'))
+    # get_clsf(video_uri=resources.video('goldeneye-justiceleague.mp4'))
+    classify_and_annotate(video_uri=resources.video('goldeneye-justiceleague.mp4'))
+    # get_clsf(video_uri=resources.video('goldeneye-2x.mp4'))
+    # get_clsf(video_uri=resources.video('TUD-Campus.mp4'))
+    # get_clsf(video_uri=resources.video('TUD-Campus.var.rotate-scale.mp4'))
+    # get_clsf(video_uri=resources.video('TUD-Crossing.mp4'))
+    # get_clsf(video_uri=resources.video('ADL-Rundle-8.mp4'))
+    # get_clsf(video_uri=resources.video('Venice-1.mp4'))
+    # get_clsf(video_uri=resources.video('justice-league.mp4'))
+    # get_clsf(video_uri=resources.video('deadpool2.mp4'))
+    # get_clsf(video_uri=resources.video('ant-man-and-wasp.mp4'))
+    # get_clsf(video_uri=resources.video('bvs.mp4'))
+    # get_clsf(video_uri=resources.video('goldeneye.mp4'))
+    # classify_and_annotate(resources.video('TUD-Campus.var.rotate-scale-flip-color.mp4'))
