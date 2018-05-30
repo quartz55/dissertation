@@ -1,5 +1,3 @@
-from typing import List
-
 import attr
 import imageio
 import numpy as np
@@ -10,26 +8,27 @@ from cimc import resources, utils
 from cimc.models.places.places import Places365, SceneType
 
 
-@attr.s(slots=True)
+@attr.s(slots=True, frozen=True)
 class CategoryPrediction:
     id: int = attr.ib()
     label: str = attr.ib()
     confidence: float = attr.ib()
 
 
-@attr.s(slots=True)
+@attr.s(slots=True, frozen=True)
 class AttributePrediction:
     id: int = attr.ib()
     label: str = attr.ib()
+    frequency: float = attr.ib()
 
 
-@attr.s(slots=True)
+@attr.s(slots=True, frozen=True)
 class SceneClassification:
     type: SceneType = attr.ib()
-    categories: List[CategoryPrediction] = attr.ib()
-    attributes: List[AttributePrediction] = attr.ib()
-    num_measures: int = attr.ib()
+    categories: np.ndarray = attr.ib()
+    attributes: np.ndarray = attr.ib()
     length: int = attr.ib()
+    num_measures: int = attr.ib()
 
 
 class SceneClassifier:
@@ -57,20 +56,19 @@ class SceneClassifier:
     def classification(self):
         types = np.array([r.type.value for r in self._results])
         ty = SceneType(np.round(np.mean(types)))
-        top_5_cats_idx = np.argsort(self._probs_cats)[::-1][:5]
-        top_5_cats_conf = self._probs_cats[top_5_cats_idx] / len(self._results)
-        top_5_cats = lbl.CATEGORIES[top_5_cats_idx]
 
-        top_10_attrs_idx = np.argsort(self._attrs_acc)[::-1][:10]
-        top_10_attrs = lbl.ATTRIBUTES[top_10_attrs_idx]
+        cats_idx = np.argsort(self._probs_cats)[::-1]
+        cats_conf = self._probs_cats[cats_idx] / len(self._results)
+        categories = zip(cats_idx, lbl.CATEGORIES[cats_idx]['label'], cats_conf)
+        categories = np.fromiter(categories, count=len(lbl.CATEGORIES),
+                                 dtype=[('id', 'u4'), ('label', 'U40'), ('conf', 'f4')])
 
-        categories = [CategoryPrediction(id=cat['id'],
-                                         label=cat['label'],
-                                         confidence=conf)
-                      for cat, conf in zip(top_5_cats, top_5_cats_conf)]
-        attributes = [AttributePrediction(id=id,
-                                          label=label)
-                      for id, label in top_10_attrs[['id', 'label']]]
+        attrs_idx = np.argsort(self._attrs_acc)[::-1]
+        attrs_freq = self._attrs_acc[attrs_idx] / len(self._results)
+        attributes = zip(attrs_idx, lbl.ATTRIBUTES[attrs_idx]['label'], attrs_freq)
+        attributes = np.fromiter(attributes, count=len(lbl.ATTRIBUTES),
+                                 dtype=[('id', 'u4'), ('label', 'U40'), ('freq', 'f4')])
+
         result = SceneClassification(type=ty,
                                      categories=categories,
                                      attributes=attributes,
@@ -104,12 +102,12 @@ def classify_scene(video_uri: str, interval: float = 1):
 def test_classify_scene():
     result = classify_scene(resources.video('Venice-1.mp4'))
     assert result.type == SceneType.OUTDOOR
-    assert len(result.categories) == 5
-    assert len(result.attributes) == 10
-    assert result.categories[0].label == 'plaza'
-    assert 'natural light' in [a.label for a in result.attributes]
-    assert 'man-made' in [a.label for a in result.attributes]
-    assert 'open area' in [a.label for a in result.attributes]
+    top_5_cats = result.categories[:5]
+    top_10_attrs = result.attributes[:10]
+    assert 'plaza' in top_5_cats['label']
+    assert 'natural light' in top_10_attrs['label']
+    assert 'man-made' in top_10_attrs['label']
+    assert 'open area' in top_10_attrs['label']
 
 
 if __name__ == '__main__':

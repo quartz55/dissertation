@@ -1,6 +1,7 @@
 import pickle
-from typing import Set, Dict, List
+from typing import Set, Dict, List, Tuple, Optional
 
+import attr
 import numpy as np
 import pandas as pd
 import sklearn.metrics.pairwise as metrics
@@ -40,30 +41,42 @@ def clean_vector(v: pd.DataFrame):
     return v.loc[:, (v != 0).any(axis=0)]
 
 
+def process_feature_vector(fv: pd.DataFrame):
+    pass
+
+
 def make_feature_vector(segment: Segment):
     fv = np.zeros(COLUMNS, dtype=np.double)
-    objs_by_class = _obj_id_by_class(segment)
+
     # Type
     s_type = segment.scene.type
-    fv[TYPE[0]] = 1 if s_type is SceneType.INDOOR else 0
+    fv[TYPE[0]] = 1 if s_type is SceneType.INDOOR else -1
+
+    # Duration
     # fv[DURATION[0]] = segment.duration
     fv[DURATION[0]] = 0
 
     # Categories
-    categories = segment.scene.categories
-    conf_rest = 1 - sum([c.confidence for c in categories])
-    conf_add = conf_rest / len(categories)
-    for cat in categories:
-        fv[CATEGORIES[0] + cat.id] = cat.confidence + conf_add
+    cats = segment.scene.categories
+    confs = cats['conf']
+    fv[cats['id'] + CATEGORIES[0]] = confs / np.sqrt(confs.dot(confs))
 
     # Attributes
-    for attr in segment.scene.attributes:
-        fv[ATTRIBUTES[0] + attr.id] = 1 / len(segment.scene.attributes)
+    attrs = segment.scene.attributes
+    freqs = attrs['freq']
+    fv[attrs['id'] + ATTRIBUTES[0]] = freqs / np.sqrt(freqs.dot(freqs))
 
     # Objects
-    total = sum([len(o) for o in objs_by_class.values()])
-    for cls_id, objs_ids in objs_by_class.items():
-        fv[OBJECTS[0] + cls_id] = 0 if total == 0 else len(objs_ids) / total
+    objs_by_class = _obj_id_by_class(segment)
+    objs = np.array([(cls_id, len(objs_ids))
+                     for cls_id, objs_ids in objs_by_class.items()],
+                    dtype=[('id', 'u4'), ('count', 'u4')])
+    counts = objs['count']
+    if counts.sum() != 0:
+        fv[objs['id'] + OBJECTS[0]] = counts / np.sqrt(counts.dot(counts))
+
+    # Unit vector
+    fv /= np.sqrt(fv.dot(fv))
 
     return pd.DataFrame(fv[np.newaxis], columns=HEADERS, index=[segment.id])
 
@@ -75,7 +88,7 @@ def _aux(classes):
     return classes_label
 
 
-def similarity(segments: List[Segment], other: List[Segment] = None):
+def segment_similarity(segments: List[Segment], other: List[Segment] = None):
     if other is not None and isinstance(other, list) and len(other) > 0:
         fvs = pd.concat([make_feature_vector(s) for s in segments + other])
         fvs_clean = clean_vector(fvs)
@@ -140,40 +153,80 @@ def _timings():
     print(timings)
 
 
-vid1 = resources.video("TUD-Campus.mp4.clsf")
-vid1_alt1 = resources.video("TUD-Campus.var.rotate-scale.mp4.clsf")
-vid1_alt2 = resources.video("TUD-Campus.var.rotate-scale-flip-color.mp4.clsf")
-
-vid2 = resources.video("goldeneye.mp4.clsf")
-vid2_2x = resources.video("goldeneye-2x.mp4.clsf")
-
-vid3 = resources.video("TUD-Crossing.mp4.clsf")
-
-vid4 = resources.video("justice-league.mp4.clsf")
-
-vid5 = resources.video("goldeneye-justiceleague.mp4.clsf")
+def match_segments(sim_mat: np.ndarray, thres: float = 0.5):
+    match_idx = np.argwhere(sim_mat > thres)
+    return match_idx
 
 
-def vid_similarity(vid1, vid2):
-    with open(vid1, 'rb') as fd1:
-        with open(vid2, 'rb') as fd2:
-            clsf1: VideoClassification = pickle.load(fd1)
-            clsf2: VideoClassification = pickle.load(fd2)
-            sim_2 = similarity(clsf1.segments, clsf2.segments)
-            print(f"First scene distance: {sim_2[0][0] * 100:.2f}%")
-            return sim_2
+@attr.s(slots=True, frozen=True, repr=False)
+class SimilarityResult:
+    video_1: Tuple[str, str] = attr.ib()
+    video_2: Tuple[str, str] = attr.ib()
+    threshold: float = attr.ib()
+    assignments: List[List[Tuple[int, float]]] = attr.ib()
+    similarity_matrix: Optional[np.ndarray] = attr.ib()
+
+    def __repr__(self):
+        aux = f"#### SIMILARITY ####\n" \
+              f"# Video1: '{self.video_1[0]}' File: {self.video_1[1]}\n" \
+              f"# Video2: '{self.video_2[0]}' File: {self.video_2[1]}\n" \
+              f"# Threshold: {self.threshold*100:.2f}%\n" \
+              f"#-----------\n" \
+              f"# {'Video1 Scene':>12} -> Video2 Matches (showing best 3)\n"
+        for sc_id, ass in enumerate(self.assignments):
+            ass_str = " ".join(("{:12}".format(f'{id}({sim*100:.2f}%)') for id, sim in ass[:3]))
+            divisor = "->" if len(ass_str) > 0 else "||"
+            aux += f"# {sc_id:12} {divisor} {ass_str}\n"
+        aux += "####################"
+        return aux
+
+
+def video_similarity(clsf1_uri: str, clsf2_uri: str, threshold: float = 0.7):
+    with open(clsf1_uri, 'rb') as fd1:
+        clsf1: VideoClassification = pickle.load(fd1)
+
+    with open(clsf2_uri, 'rb') as fd2:
+        clsf2: VideoClassification = pickle.load(fd2)
+
+    sim_matrix = segment_similarity(clsf1.segments, clsf2.segments)
+    matches = match_segments(sim_matrix, threshold)
+    res = [None] * len(sim_matrix)
+    for i in range(len(res)):
+        matching = matches[:, 1][matches[:, 0] == i]
+        similarity = sim_matrix[i][matching]
+        sorted_sim_idx = np.argsort(similarity)[::-1]
+        seg_res = list(zip(matching[sorted_sim_idx], similarity[sorted_sim_idx]))
+        res[i] = seg_res
+    return SimilarityResult(video_1=(clsf1.name, clsf1.filename),
+                            video_2=(clsf2.name, clsf2.filename),
+                            threshold=threshold,
+                            assignments=res,
+                            similarity_matrix=sim_matrix)
 
 
 def main():
-    # s1 = vid_similarity(vid1, vid1_alt1)
-    # s2 = vid_similarity(vid1, vid1_alt2)
-    # s3 = vid_similarity(vid1, vid3)
-    # s4 = vid_similarity(vid1, vid2)
-    # s5 = vid_similarity(vid2, vid2_2x)
-    # s6 = vid_similarity(vid24 vid4)
+    vid1 = resources.video("TUD-Campus.mp4.clsf")
+    vid1_alt1 = resources.video("TUD-Campus.var.rotate-scale.mp4.clsf")
+    vid1_alt2 = resources.video("TUD-Campus.var.rotate-scale-flip-color.mp4.clsf")
 
-    s7 = vid_similarity(vid2, vid5)
-    s8 = vid_similarity(vid4, vid5)
+    vid2 = resources.video("goldeneye.mp4.clsf")
+    vid2_2x = resources.video("goldeneye-2x.mp4.clsf")
+
+    vid3 = resources.video("TUD-Crossing.mp4.clsf")
+
+    vid4 = resources.video("justice-league.mp4.clsf")
+
+    vid5 = resources.video("goldeneye-justiceleague.mp4.clsf")
+
+    s1 = video_similarity(vid1, vid1_alt1)
+    s2 = video_similarity(vid1, vid1_alt2)
+    s3 = video_similarity(vid1, vid3)
+    # s4 = video_similarity(vid1, vid2)
+    # s5 = video_similarity(vid2, vid2_2x)
+    # s6 = video_similarity(vid24 vid4)
+
+    s7 = video_similarity(vid2, vid5)
+    s8 = video_similarity(vid4, vid5)
     pass
 
 

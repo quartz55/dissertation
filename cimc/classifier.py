@@ -105,7 +105,8 @@ class VideoClassification(VideoMetaMixin):
         if metadata is None:
             if reader is None and os.path.isfile(file_uri):
                 try:
-                    with imageio.get_reader(file_uri) as reader:  # type: Format.Reader
+                    # type: Format.Reader
+                    with imageio.get_reader(file_uri) as reader:
                         metadata = reader.get_meta_data()
                 except (ValueError, RuntimeError):
                     pass
@@ -203,7 +204,8 @@ def classify_video(video_uri: str) -> VideoClassification:
             logger.debug(f"Saved YOLOv3 detections as '{detections_uri}'")
 
         time_taken = utils.duration_str(t_end - t_start)
-        logger.info(f"Finished classifying '{video_uri}' in {time_taken} (found {len(clsf.segments)} scenes)")
+        logger.info(
+            f"Finished classifying '{video_uri}' in {time_taken} (found {len(clsf.segments)} scenes)")
 
         return clsf
 
@@ -243,7 +245,8 @@ def annotate_video(video_uri: str, clsf: VideoClassification):
                     out_img.paste(curr_overlay, mask=curr_overlay)
                     out_img = np.array(out_img)
                     start, end = curr_segment.start, curr_segment.end
-                    scene_change_bleep_duration = min(int(fps / 2), end - start)
+                    scene_change_bleep_duration = min(
+                        int(fps / 2), end - start)
                     if i <= curr_segment.start < i + scene_change_bleep_duration:
                         out_img[-40:, -40:] = [255, 0, 0]
                     out.append_data(out_img)
@@ -262,11 +265,11 @@ def scene_class_overlay(frame: np.ndarray,
     text = f"Segment: {segment.id}({start}-{end}) {end-start} frames({length} read, {n_measures} measured)\n" \
            f"Type: {scene.type.name}\n" \
            f"Categories:\n"
-    for cat in scene.categories:
-        text += f"  - {cat.label}({cat.confidence*100:.2f}%)\n"
+    for _, label, conf in scene.categories[:5]:
+        text += f"  - {label}({conf*100:.2f}%)\n"
     text += f"Attributes:\n"
-    for attr in scene.attributes:
-        text += f"  - {attr.label}\n"
+    for _, label, freq in scene.attributes[:10]:
+        text += f"  - {label}({freq*100:.2f}%)\n"
 
     overlay = Image.new('RGBA', (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -330,16 +333,18 @@ if __name__ == '__main__':
     # except:
     #     pass
     # get_clsf(video_uri=resources.video('goldeneye-justiceleague.mp4'))
-    classify_and_annotate(video_uri=resources.video('goldeneye-justiceleague.mp4'))
-    # get_clsf(video_uri=resources.video('goldeneye-2x.mp4'))
-    # get_clsf(video_uri=resources.video('TUD-Campus.mp4'))
-    # get_clsf(video_uri=resources.video('TUD-Campus.var.rotate-scale.mp4'))
-    # get_clsf(video_uri=resources.video('TUD-Crossing.mp4'))
-    # get_clsf(video_uri=resources.video('ADL-Rundle-8.mp4'))
-    # get_clsf(video_uri=resources.video('Venice-1.mp4'))
-    # get_clsf(video_uri=resources.video('justice-league.mp4'))
-    # get_clsf(video_uri=resources.video('deadpool2.mp4'))
-    # get_clsf(video_uri=resources.video('ant-man-and-wasp.mp4'))
-    # get_clsf(video_uri=resources.video('bvs.mp4'))
-    # get_clsf(video_uri=resources.video('goldeneye.mp4'))
-    # classify_and_annotate(resources.video('TUD-Campus.var.rotate-scale-flip-color.mp4'))
+    classify_and_annotate(resources.video('goldeneye-justiceleague.mp4'))
+    classify_and_annotate(resources.video('goldeneye.mp4'))
+    classify_and_annotate(resources.video('goldeneye-2x.mp4'))
+    classify_and_annotate(resources.video('TUD-Campus.mp4'))
+    classify_and_annotate(resources.video('TUD-Campus.var.rotate-scale.mp4'))
+    classify_and_annotate(resources.video('TUD-Crossing.mp4'))
+    classify_and_annotate(resources.video('ADL-Rundle-8.mp4'))
+    classify_and_annotate(resources.video('Venice-1.mp4'))
+    classify_and_annotate(resources.video('justice-league.mp4'))
+    classify_and_annotate(resources.video('deadpool2.mp4'))
+    classify_and_annotate(resources.video('ant-man-and-wasp.mp4'))
+    classify_and_annotate(resources.video('bvs.mp4'))
+    classify_and_annotate(resources.video('goldeneye.mp4'))
+    classify_and_annotate(resources.video(
+        'TUD-Campus.var.rotate-scale-flip-color.mp4'))

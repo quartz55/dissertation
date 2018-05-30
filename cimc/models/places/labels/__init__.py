@@ -10,12 +10,8 @@ IO_URL = 'https://raw.githubusercontent.com/csailvision/places365/master/IO_plac
 ATTRIBUTES_URL = 'https://raw.githubusercontent.com/csailvision/places365/master/labels_sunattribute.txt'
 ATTRS_WEIGHTS_URL = 'http://places2.csail.mit.edu/models_places365/W_sceneattribute_wideresnet18.npy'
 
-category_type = np.dtype([('id', np.int32),
-                          ('label', np.unicode, 40),
-                          ('type', np.uint8)])
-attribute_type = np.dtype([('id', np.int32),
-                           ('label', np.unicode, 40),
-                           ('weights', np.float64, (512,))])
+category_type = np.dtype([('id', 'i4'), ('label', 'U40'), ('type', 'u1')])
+attribute_type = np.dtype([('id', np.int32), ('label', 'U40'), ('weights', 'f4', (512,))])
 
 CATEGORIES: np.ndarray
 ATTRIBUTES: np.ndarray
