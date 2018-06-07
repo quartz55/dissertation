@@ -1,4 +1,6 @@
+import os
 import pickle
+import logging
 from typing import Set, Dict, List, Tuple, Optional
 
 import attr
@@ -11,19 +13,25 @@ import cimc.models.yolov3.labels as yolo_labels
 from cimc import resources
 from cimc.classifier import Segment, VideoClassification
 from cimc.models.places import SceneType
+from cimc.utils import log
+
+logger = logging.getLogger(__name__)
+logger.addHandler(log.TqdmLoggingHandler())
+logger.setLevel(logging.DEBUG)
 
 TYPE = (0, 1)
 DURATION = (sum(TYPE), 1)
 CATEGORIES = (sum(DURATION), len(places_labels.CATEGORIES))
 ATTRIBUTES = (sum(CATEGORIES), len(places_labels.ATTRIBUTES))
 OBJECTS = (sum(ATTRIBUTES), len(yolo_labels.COCO_LABELS))
-COLUMNS = sum(
-    map(lambda x: x[1], [TYPE, DURATION, CATEGORIES, ATTRIBUTES, OBJECTS]))
-HEADERS = ['Type'] + \
-          ['Duration'] + \
-          [f'sc_{name}' for name in places_labels.CATEGORIES['label']] + \
-          [f'attr_{name}' for name in places_labels.ATTRIBUTES['label']] + \
-          [f'cls_{name}' for name in yolo_labels.COCO_LABELS]
+COLUMNS = sum(map(lambda x: x[1], [TYPE, DURATION, CATEGORIES, ATTRIBUTES, OBJECTS]))
+HEADERS = (
+    ["Type"]
+    + ["Duration"]
+    + [f"sc_{name}" for name in places_labels.CATEGORIES["label"]]
+    + [f"attr_{name}" for name in places_labels.ATTRIBUTES["label"]]
+    + [f"cls_{name}" for name in yolo_labels.COCO_LABELS]
+)
 
 
 def _obj_id_by_class(segment: Segment):
@@ -41,10 +49,6 @@ def clean_vector(v: pd.DataFrame):
     return v.loc[:, (v != 0).any(axis=0)]
 
 
-def process_feature_vector(fv: pd.DataFrame):
-    pass
-
-
 def make_feature_vector(segment: Segment):
     fv = np.zeros(COLUMNS, dtype=np.double)
 
@@ -58,22 +62,22 @@ def make_feature_vector(segment: Segment):
 
     # Categories
     cats = segment.scene.categories
-    confs = cats['conf']
-    fv[cats['id'] + CATEGORIES[0]] = confs / np.sqrt(confs.dot(confs))
+    confs = cats["conf"]
+    fv[cats["id"] + CATEGORIES[0]] = confs / np.sqrt(confs.dot(confs))
 
     # Attributes
     attrs = segment.scene.attributes
-    freqs = attrs['freq']
-    fv[attrs['id'] + ATTRIBUTES[0]] = freqs / np.sqrt(freqs.dot(freqs))
+    freqs = attrs["freq"]
+    fv[attrs["id"] + ATTRIBUTES[0]] = freqs / np.sqrt(freqs.dot(freqs))
 
     # Objects
     objs_by_class = _obj_id_by_class(segment)
-    objs = np.array([(cls_id, len(objs_ids))
-                     for cls_id, objs_ids in objs_by_class.items()],
-                    dtype=[('id', 'u4'), ('count', 'u4')])
-    counts = objs['count']
+    objs = np.array(
+        [(cls_id, len(objs_ids)) for cls_id, objs_ids in objs_by_class.items()], dtype=[("id", "u4"), ("count", "u4")]
+    )
+    counts = objs["count"]
     if counts.sum() != 0:
-        fv[objs['id'] + OBJECTS[0]] = counts / np.sqrt(counts.dot(counts))
+        fv[objs["id"] + OBJECTS[0]] = counts / np.sqrt(counts.dot(counts))
 
     # Unit vector
     fv /= np.sqrt(fv.dot(fv))
@@ -82,9 +86,7 @@ def make_feature_vector(segment: Segment):
 
 
 def _aux(classes):
-    classes_label = {yolo_labels.COCO_LABELS[id]: {'number': len(objs),
-                                                   'set': objs}
-                     for id, objs in classes.items()}
+    classes_label = {yolo_labels.COCO_LABELS[id]: {"number": len(objs), "set": objs} for id, objs in classes.items()}
     return classes_label
 
 
@@ -92,7 +94,7 @@ def segment_similarity(segments: List[Segment], other: List[Segment] = None):
     if other is not None and isinstance(other, list) and len(other) > 0:
         fvs = pd.concat([make_feature_vector(s) for s in segments + other])
         fvs_clean = clean_vector(fvs)
-        fvs_1, fvs_2 = fvs_clean.iloc[:len(segments)], fvs_clean.iloc[len(segments):]
+        fvs_1, fvs_2 = fvs_clean.iloc[: len(segments)], fvs_clean.iloc[len(segments) :]
         return metrics.cosine_similarity(fvs_1, fvs_2)
         # return metrics.euclidean_distances(fvs_1, fvs_2)
     else:
@@ -104,7 +106,8 @@ def segment_similarity(segments: List[Segment], other: List[Segment] = None):
 
 def _timings():
     import timeit
-    with open(resources.video("TUD-Campus.mp4.clsf"), 'rb') as fd:
+
+    with open(resources.video("TUD-Campus.mp4.clsf"), "rb") as fd:
         clsf: VideoClassification = pickle.load(fd)
     segment = clsf.segments[0]
     cls1 = _aux(_obj_id_by_class(segment))
@@ -112,7 +115,7 @@ def _timings():
     fv1_raw_clean = fv1.values[:, (fv1.values != 0).any(0)]
     fv1_clean = clean_vector(fv1)
 
-    with open(resources.video("TUD-Campus.var.rotate-scale.mp4.clsf"), 'rb') as fd:
+    with open(resources.video("TUD-Campus.var.rotate-scale.mp4.clsf"), "rb") as fd:
         clsf: VideoClassification = pickle.load(fd)
     segment = clsf.segments[0]
     cls2 = _aux(_obj_id_by_class(segment))
@@ -123,26 +126,20 @@ def _timings():
     fvs = pd.concat([fv1, fv2])
     fvs_clean = clean_vector(fvs)
 
-    t1_raw = timeit.timeit("metrics.cosine_similarity(fv1.values, fv2.values)",
-                           number=10000,
-                           globals={**globals(), **locals()})
-    t1_raw_clean = timeit.timeit("metrics.cosine_similarity(fv1_raw_clean, fv2_raw_clean)",
-                                 number=10000,
-                                 globals={**globals(), **locals()})
-    t1_df_single = timeit.timeit("metrics.cosine_similarity(fv1, fv2)",
-                                 number=10000, globals={**globals(), **locals()})
-    t1_df_single_clean = timeit.timeit("metrics.cosine_similarity(fv1_clean, fv2_clean)",
-                                       number=10000,
-                                       globals={**globals(), **locals()})
-    t1_df = timeit.timeit("metrics.cosine_similarity(fvs)",
-                          number=10000,
-                          globals={**globals(), **locals()})
-    t1_df_clean = timeit.timeit("metrics.cosine_similarity(fvs_clean)",
-                                number=10000,
-                                globals={**globals(), **locals()})
+    t1_raw = timeit.timeit(
+        "metrics.cosine_similarity(fv1.values, fv2.values)", number=10000, globals={**globals(), **locals()}
+    )
+    t1_raw_clean = timeit.timeit(
+        "metrics.cosine_similarity(fv1_raw_clean, fv2_raw_clean)", number=10000, globals={**globals(), **locals()}
+    )
+    t1_df_single = timeit.timeit("metrics.cosine_similarity(fv1, fv2)", number=10000, globals={**globals(), **locals()})
+    t1_df_single_clean = timeit.timeit(
+        "metrics.cosine_similarity(fv1_clean, fv2_clean)", number=10000, globals={**globals(), **locals()}
+    )
+    t1_df = timeit.timeit("metrics.cosine_similarity(fvs)", number=10000, globals={**globals(), **locals()})
+    t1_df_clean = timeit.timeit("metrics.cosine_similarity(fvs_clean)", number=10000, globals={**globals(), **locals()})
 
-    timings = \
-        f"""
+    timings = f"""
         Raw numpy: {t1_raw:.04f}s ({t1_raw * 1e3 / 10000:.04f}ms p/ iteration)
         Raw numpy (clean): {t1_raw_clean:.04f}s ({t1_raw_clean * 1e3 / 10000:.04f}ms p/ iteration)
         2 Dataframes: {t1_df_single:.04f}s ({t1_df_single * 1e3 / 10000:.04f}ms p/ iteration)
@@ -167,14 +164,9 @@ class SimilarityResult:
     similarity_matrix: Optional[np.ndarray] = attr.ib()
 
     def __repr__(self):
-        aux = f"#### SIMILARITY ####\n" \
-              f"# Video1: '{self.video_1[0]}' File: {self.video_1[1]}\n" \
-              f"# Video2: '{self.video_2[0]}' File: {self.video_2[1]}\n" \
-              f"# Threshold: {self.threshold*100:.2f}%\n" \
-              f"#-----------\n" \
-              f"# {'Video1 Scene':>12} -> Video2 Matches (showing best 3)\n"
+        aux = f"#### SIMILARITY ####\n" f"# Video1: '{self.video_1[0]}' File: {self.video_1[1]}\n" f"# Video2: '{self.video_2[0]}' File: {self.video_2[1]}\n" f"# Threshold: {self.threshold*100:.2f}%\n" f"#-----------\n" f"# {'Video1 Scene':>12} -> Video2 Matches (showing best 3)\n"
         for sc_id, ass in enumerate(self.assignments):
-            ass_str = " ".join(("{:12}".format(f'{id}({sim*100:.2f}%)') for id, sim in ass[:3]))
+            ass_str = " ".join(("{:12}".format(f"{id}({sim*100:.2f}%)") for id, sim in ass[:3]))
             divisor = "->" if len(ass_str) > 0 else "||"
             aux += f"# {sc_id:12} {divisor} {ass_str}\n"
         aux += "####################"
@@ -182,10 +174,10 @@ class SimilarityResult:
 
 
 def video_similarity(clsf1_uri: str, clsf2_uri: str, threshold: float = 0.7):
-    with open(clsf1_uri, 'rb') as fd1:
+    with open(clsf1_uri, "rb") as fd1:
         clsf1: VideoClassification = pickle.load(fd1)
 
-    with open(clsf2_uri, 'rb') as fd2:
+    with open(clsf2_uri, "rb") as fd2:
         clsf2: VideoClassification = pickle.load(fd2)
 
     sim_matrix = segment_similarity(clsf1.segments, clsf2.segments)
@@ -197,11 +189,61 @@ def video_similarity(clsf1_uri: str, clsf2_uri: str, threshold: float = 0.7):
         sorted_sim_idx = np.argsort(similarity)[::-1]
         seg_res = list(zip(matching[sorted_sim_idx], similarity[sorted_sim_idx]))
         res[i] = seg_res
-    return SimilarityResult(video_1=(clsf1.name, clsf1.filename),
-                            video_2=(clsf2.name, clsf2.filename),
-                            threshold=threshold,
-                            assignments=res,
-                            similarity_matrix=sim_matrix)
+    return SimilarityResult(
+        video_1=(clsf1.name, clsf1.filename),
+        video_2=(clsf2.name, clsf2.filename),
+        threshold=threshold,
+        assignments=res,
+        similarity_matrix=sim_matrix,
+    )
+
+
+def test_dataset():
+    dataset = resources.load_similarities()
+    for name, annotation in dataset.items():
+        vid1, vid2 = annotation["video_1"], annotation["video_2"]
+        clsf1_uri = resources.video(f"{vid1}.clsf")
+        if not os.path.isfile(clsf1_uri):
+            logger.error(f"No classification for video {vid1} found: '{clsf1_uri}' not found")
+            raise FileNotFoundError(clsf1_uri)
+
+        clsf2_uri = resources.video(f"{vid2}.clsf")
+        if not os.path.isfile(clsf2_uri):
+            logger.error(f"No classification for video {vid2} found: '{clsf2_uri}' not found")
+            raise FileNotFoundError(clsf2_uri)
+
+        calculated = video_similarity(clsf1_uri, clsf2_uri)
+        actual = annotation["matches"]
+        top_1_acc = 0
+        top_3_acc = 0
+        stats: {"false_positives": 0}
+        for scene_id, matches in enumerate(calculated.assignments):
+            true_match = scene_id in actual
+            has_matches = len(matches) > 0
+            if true_match and has_matches:
+                actual_matches = set(actual[scene_id])
+                if matches[0][0] in actual_matches:
+                    top_1_acc += 1
+                    top_3_acc += 1
+                elif actual_matches.issubset(set([m[0] for m in matches[:3]])):
+                    top_3_acc += 1
+            elif not true_match and not has_matches:
+                top_1_acc += 1
+                top_3_acc += 1
+            elif not true_match and has_matches:
+                stats["false_positives"] += 1
+
+        total = len(calculated.assignments)
+        top_1_percent = top_1_acc / total
+        top_3_percent = top_3_acc / total
+        logger.info(
+            f"""
+Annotation: {name}
+  Video1: {vid1}
+  Video2: {vid2}
+  Top 1%: {top_1_percent*100:.2f}%({top_1_acc} / {total})
+  Top 3%: {top_3_percent*100:.2f}%({top_3_acc} / {total})"""
+        )
 
 
 def main():
@@ -221,14 +263,14 @@ def main():
     s1 = video_similarity(vid1, vid1_alt1)
     s2 = video_similarity(vid1, vid1_alt2)
     s3 = video_similarity(vid1, vid3)
-    # s4 = video_similarity(vid1, vid2)
-    # s5 = video_similarity(vid2, vid2_2x)
-    # s6 = video_similarity(vid24 vid4)
+    s4 = video_similarity(vid1, vid2)
+    s5 = video_similarity(vid2, vid2_2x)
+    s6 = video_similarity(vid2, vid4)
 
     s7 = video_similarity(vid2, vid5)
     s8 = video_similarity(vid4, vid5)
     pass
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    test_dataset()

@@ -29,3 +29,4 @@ dependencies:
     - filterpy
     - attrs
     - pytest
+    - pyyaml
