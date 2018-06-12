@@ -216,7 +216,7 @@ def test_dataset():
         actual = annotation["matches"]
         top_1_acc = 0
         top_3_acc = 0
-        stats: {"false_positives": 0}
+        stats = {"false_positives": 0}
         for scene_id, matches in enumerate(calculated.assignments):
             true_match = scene_id in actual
             has_matches = len(matches) > 0

@@ -13,7 +13,7 @@ from torchvision.transforms import transforms as tf
 import cimc.resources as resources
 import cimc.utils as utils
 from . import labels as lbl
-from .wideresnet import ResNet, BasicBlock
+from .wideresnet import WideResNet, BasicBlock, Bottleneck
 
 
 class SceneType(int, Enum):
@@ -21,12 +21,9 @@ class SceneType(int, Enum):
     OUTDOOR = 1
 
 
-category_pred_type = np.dtype([('id', np.int32),
-                               ('label', np.unicode, 40),
-                               ('confidence', np.float32)])
+category_pred_type = np.dtype([("id", np.int32), ("label", np.unicode, 40), ("confidence", np.float32)])
 
-attribute_pred_type = np.dtype([('id', np.int32),
-                                ('label', np.unicode, 40)])
+attribute_pred_type = np.dtype([("id", np.int32), ("label", np.unicode, 40)])
 
 
 def returnCAM(feature_conv, weight_softmax, class_idx):
@@ -52,25 +49,29 @@ class PlacesClassification:
     timings: Dict[str, float] = attr.ib(factory=dict)
 
     def __str__(self):
-        tmp = f"┌─PLACES CLASSIFICATION\n" \
-              f"├─TYPE: {self.type.name}\n" \
-              f"├─CATEGORIES:\n"
+        tmp = f"┌─PLACES CLASSIFICATION\n" f"├─TYPE: {self.type.name}\n" f"├─CATEGORIES:\n"
         for cat in self.categories:
             tmp += f"│   {cat['name']}({cat['confidence']*100:.2f}%)\n"
         if len(self.attributes) > 0:
-            tmp += f"└─ATTRIBUTES:\n" \
-                   f"    {', '.join(sorted(self.attributes['label']))}"
+            tmp += f"└─ATTRIBUTES:\n" f"    {', '.join(sorted(self.attributes['label']))}"
         return tmp
 
 
-class Places365(ResNet):
+class Places365(WideResNet):
     def __init__(self):
+        # 18 layers
         super().__init__(BasicBlock, [2, 2, 2, 2], num_classes=365)
-        self.pre_process = tf.Compose([
-            tf.Resize((224, 224)),
-            tf.ToTensor(),
-            tf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
+        # 34 layers
+        # super().__init__(BasicBlock, [3, 4, 6, 3], num_classes=365)
+        # 50 layers
+        # super().__init__(Bottleneck, [3, 4, 6, 3], num_classes=365)
+        # 101 layers
+        # super().__init__(Bottleneck, [3, 4, 23, 3], num_classes=365)
+        # 152 layers
+        # super().__init__(Bottleneck, [3, 8, 36, 3], num_classes=365)
+        self.pre_process = tf.Compose(
+            [tf.Resize((224, 224)), tf.ToTensor(), tf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]
+        )
 
     def classify(self, image: utils.ImageType) -> PlacesClassification:
         img = utils.to_image(image)
@@ -84,8 +85,8 @@ class Places365(ResNet):
         def hook(name, _m, _i, o):
             features[name] = np.squeeze(o.detach().cpu().numpy())
 
-        hooks['layer4'] = self.layer4.register_forward_hook(f.partial(hook, 'layer4'))
-        hooks['avgpool'] = self.avgpool.register_forward_hook(f.partial(hook, 'avgpool'))
+        hooks["layer4"] = self.layer4.register_forward_hook(f.partial(hook, "layer4"))
+        hooks["avgpool"] = self.avgpool.register_forward_hook(f.partial(hook, "avgpool"))
 
         # get the softmax weight
         params = list(self.parameters())
@@ -105,29 +106,27 @@ class Places365(ResNet):
             probs_cats, cats_idx = probs_cats.cpu().numpy(), cats_idx.cpu().numpy()
             top_5_cats = lbl.CATEGORIES[cats_idx[:5]]
 
-            io_image = np.mean(lbl.CATEGORIES[cats_idx[:10]]['type'])  # vote for the indoor or outdoor
-            responses_attribute = lbl.ATTRIBUTES['weights'].dot(features['avgpool'])
+            io_image = np.mean(lbl.CATEGORIES[cats_idx[:10]]["type"])  # vote for the indoor or outdoor
+            responses_attribute = lbl.ATTRIBUTES["weights"].dot(features["avgpool"])
             attrs_idx = np.argsort(responses_attribute)
             top_10_attrs = lbl.ATTRIBUTES[attrs_idx[-1:-10:-1]]
             t4 = time.time()
 
             env_type = SceneType.INDOOR if io_image < 0.5 else SceneType.OUTDOOR
-            categories = np.fromiter(((id, label, conf)
-                                      for (id, label), conf in zip(top_5_cats[['id', 'label']], probs_cats[:5])),
-                                     dtype=category_pred_type)
-            attributes = top_10_attrs[['id', 'label']].astype(attribute_pred_type)
+            categories = np.fromiter(
+                ((id, label, conf) for (id, label), conf in zip(top_5_cats[["id", "label"]], probs_cats[:5])),
+                dtype=category_pred_type,
+            )
+            attributes = top_10_attrs[["id", "label"]].astype(attribute_pred_type)
             t5 = time.time()
             timings = {
-                'pre_process': t2 - t1,
-                'forward_pass': t3 - t2,
-                'result_prep': t4 - t3,
-                'result_creation': t5 - t4,
-                'total': t5 - t1
+                "pre_process": t2 - t1,
+                "forward_pass": t3 - t2,
+                "result_prep": t4 - t3,
+                "result_creation": t5 - t4,
+                "total": t5 - t1,
             }
-            result = PlacesClassification(type=env_type,
-                                          categories=categories,
-                                          attributes=attributes,
-                                          timings=timings)
+            result = PlacesClassification(type=env_type, categories=categories, attributes=attributes, timings=timings)
             for h in hooks.values():
                 h.remove()
             return result
@@ -136,14 +135,12 @@ class Places365(ResNet):
     def pre_trained(cls, model_file: str = None):
         if model_file is None:
             model_file = resources.weight("wideresnet18_places365.pth.tar")
-        # utils.simple_download('http://places2.csail.mit.edu/models_places365/wideresnet18_places365.pth.tar',
-        #                       model_file)
-        utils.downloader.download_sync('http://places2.csail.mit.edu/models_places365/wideresnet18_places365.pth.tar',
-                                       model_file)
+        utils.downloader.download_sync(
+            "http://places2.csail.mit.edu/models_places365/wideresnet18_places365.pth.tar", model_file
+        )
         m = cls()
         checkpoint = torch.load(model_file, map_location=lambda st, loc: st)
-        m.load_state_dict({str.replace(k, 'module.', ''): v
-                           for k, v in checkpoint['state_dict'].items()})
+        m.load_state_dict({str.replace(k, "module.", ""): v for k, v in checkpoint["state_dict"].items()})
         return m
 
 
@@ -152,7 +149,7 @@ def main():
     model.to(utils.best_device)
     n_timings = 50
     timings = np.empty(n_timings)
-    test_image = resources.image('places-test.jpg')
+    test_image = resources.image("places-test.jpg")
     # Warmup
     for i in range(5):
         model.classify(test_image)
@@ -166,5 +163,5 @@ def main():
     print(res.timings)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

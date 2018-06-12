@@ -9,17 +9,14 @@ import cimc.utils as utils
 from cimc import resources
 from . import darknet
 
-YOLOV3_WEIGHTS_URL = 'https://pjreddie.com/media/files/yolov3.weights'
-YOLOV3_CFG = os.path.join(os.path.dirname(__file__), 'yolov3.cfg')
+YOLOV3_WEIGHTS_URL = "https://pjreddie.com/media/files/yolov3.weights"
+YOLOV3_CFG = os.path.join(os.path.dirname(__file__), "yolov3.cfg")
 
 
 class YoloV3(darknet.Darknet):
     def __init__(self):
         super().__init__(YOLOV3_CFG)
-        self.pre_process = tf.Compose([
-            tf.Resize((self.height, self.width)),
-            tf.ToTensor()
-        ])
+        self.pre_process = tf.Compose([tf.Resize((self.height, self.width)), tf.ToTensor()])
 
     def detect(self, image: utils.ImageType, confidence=0.25, nms_thres=0.4):
         if not isinstance(image, Image.Image):
@@ -42,22 +39,14 @@ class YoloV3(darknet.Darknet):
             boxes = nms(boxes, nms_thres)
             t3 = time.time()
 
-            timings = {
-                'pre_process': t1 - t0,
-                'predict': t2 - t1,
-                'nms': t3 - t2,
-                'total': t3 - t0
-            }
+            timings = {"pre_process": t1 - t0, "predict": t2 - t1, "nms": t3 - t2, "total": t3 - t0}
             return boxes, timings
 
     @classmethod
     def pre_trained(cls, weights_file: str = None):
         if weights_file is None:
-            weights_file = resources.weight('yolov3.weights')
-        utils.downloader.download_sync(YOLOV3_WEIGHTS_URL,
-                                       weights_file)
-        # utils.simple_download(YOLOV3_WEIGHTS_URL,
-        #                       weights_file)
+            weights_file = resources.weight("yolov3.weights")
+        utils.downloader.download_sync(YOLOV3_WEIGHTS_URL, weights_file)
         net = cls()
         net.load_weights(weights_file)
         return net
