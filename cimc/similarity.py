@@ -1,7 +1,7 @@
+import logging
 import os
 import pickle
-import logging
-from typing import Set, Dict, List, Tuple, Optional
+from typing import Set, Dict, List, Tuple, Optional, Union
 
 import attr
 import numpy as np
@@ -26,11 +26,11 @@ ATTRIBUTES = (sum(CATEGORIES), len(places_labels.ATTRIBUTES))
 OBJECTS = (sum(ATTRIBUTES), len(yolo_labels.COCO_LABELS))
 COLUMNS = sum(map(lambda x: x[1], [TYPE, DURATION, CATEGORIES, ATTRIBUTES, OBJECTS]))
 HEADERS = (
-    ["Type"]
-    + ["Duration"]
-    + [f"sc_{name}" for name in places_labels.CATEGORIES["label"]]
-    + [f"attr_{name}" for name in places_labels.ATTRIBUTES["label"]]
-    + [f"cls_{name}" for name in yolo_labels.COCO_LABELS]
+        ["Type"]
+        + ["Duration"]
+        + [f"sc_{name}" for name in places_labels.CATEGORIES["label"]]
+        + [f"attr_{name}" for name in places_labels.ATTRIBUTES["label"]]
+        + [f"cls_{name}" for name in yolo_labels.COCO_LABELS]
 )
 
 
@@ -94,7 +94,7 @@ def segment_similarity(segments: List[Segment], other: List[Segment] = None):
     if other is not None and isinstance(other, list) and len(other) > 0:
         fvs = pd.concat([make_feature_vector(s) for s in segments + other])
         fvs_clean = clean_vector(fvs)
-        fvs_1, fvs_2 = fvs_clean.iloc[: len(segments)], fvs_clean.iloc[len(segments) :]
+        fvs_1, fvs_2 = fvs_clean.iloc[: len(segments)], fvs_clean.iloc[len(segments):]
         return metrics.cosine_similarity(fvs_1, fvs_2)
         # return metrics.euclidean_distances(fvs_1, fvs_2)
     else:
@@ -173,12 +173,30 @@ class SimilarityResult:
         return aux
 
 
-def video_similarity(clsf1_uri: str, clsf2_uri: str, threshold: float = 0.7):
-    with open(clsf1_uri, "rb") as fd1:
-        clsf1: VideoClassification = pickle.load(fd1)
+ClsfArg = Union[str, VideoClassification]
 
-    with open(clsf2_uri, "rb") as fd2:
-        clsf2: VideoClassification = pickle.load(fd2)
+
+def video_similarity(clsf1_uri: ClsfArg,
+                     clsf2_uri: ClsfArg,
+                     threshold: float = 0.7):
+    clsf1: VideoClassification
+    clsf2: VideoClassification
+
+    if isinstance(clsf1_uri, str):
+        with open(clsf1_uri, "rb") as fd1:
+            clsf1 = pickle.load(fd1)
+    elif isinstance(clsf1_uri, VideoClassification):
+        clsf1 = clsf1_uri
+    else:
+        raise ValueError("clsf1 must be a path or a VideoClassification")
+
+    if isinstance(clsf2_uri, str):
+        with open(clsf2_uri, "rb") as fd2:
+            clsf2 = pickle.load(fd2)
+    elif isinstance(clsf2_uri, VideoClassification):
+        clsf2 = clsf2_uri
+    else:
+        raise ValueError("clsf2 must be a path or a VideoClassification")
 
     sim_matrix = segment_similarity(clsf1.segments, clsf2.segments)
     matches = match_segments(sim_matrix, threshold)

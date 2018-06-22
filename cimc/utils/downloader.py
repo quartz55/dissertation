@@ -27,7 +27,9 @@ TEST_FILES = {
 
 logger = logging.getLogger(__name__)
 logger.addHandler(log.TqdmLoggingHandler())
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
+
+evt_loop = asyncio.new_event_loop()
 
 
 class UrlNoByteRangesError(Exception):
@@ -284,16 +286,16 @@ def _download_tqdm(down: Download, **kwargs):
 
 async def download(uri: str,
                    filename: str = None,
-                   dir: str = None,
+                   directory: str = None,
                    segments: int = None,
                    overwrite: bool = False,
-                   session: aiohttp.ClientSession = None):
+                   session: aiohttp.ClientSession = None) -> Tuple[str, str]:
     if segments is None or segments > 1:
         if segments is None:
             segments = psutil.cpu_count(logical=True)
         down = AccelDownload(uri,
                              filename=filename,
-                             directory=dir,
+                             directory=directory,
                              segments=segments,
                              session=session)
         if not overwrite and os.access(down.filepath, os.W_OK):
@@ -306,10 +308,11 @@ async def download(uri: str,
                                 postfix=dict(segments=down.num_segments)) as bar:
                 async for segment_chunk in down:
                     bar.update(len(segment_chunk))
+        return uri, down.filepath
     else:
         down = Download(uri,
                         filename=filename,
-                        directory=dir,
+                        directory=directory,
                         session=session)
         if not overwrite and os.access(down.filepath, os.W_OK):
             logger.info(f"File '{down.filepath}' already downloaded")
@@ -320,11 +323,11 @@ async def download(uri: str,
             with _download_tqdm(down) as bar:
                 async for chunk in down:
                     bar.update(len(chunk))
+        return uri, down.filepath
 
 
 def download_sync(*args, **kwargs):
-    (asyncio.get_event_loop()
-     .run_until_complete(download(*args, **kwargs)))
+    return evt_loop.run_until_complete(download(*args, **kwargs))
 
 
 async def download_queue(downloads: List[Tuple[str, str]],
@@ -355,8 +358,7 @@ async def download_queue(downloads: List[Tuple[str, str]],
 
 
 def download_queue_sync(*args, **kwargs):
-    (asyncio.get_event_loop()
-     .run_until_complete(download_queue_sync(*args, **kwargs)))
+    return evt_loop.run_until_complete(download_queue_sync(*args, **kwargs))
 
 
 def main():
@@ -380,12 +382,10 @@ def main():
         type=int,
         help="split each file into segments and download concurrently")
     args = parser.parse_args()
-    (asyncio
-     .get_event_loop()
-     .run_until_complete(download_queue(WEIGHTS.items(),
-                                        None,
-                                        args.parallel,
-                                        args.segments)))
+    download_queue_sync(download_queue(WEIGHTS.items(),
+                                       None,
+                                       args.parallel,
+                                       args.segments))
 
 
 if __name__ == '__main__':

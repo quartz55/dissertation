@@ -28,7 +28,7 @@ logger.setLevel(logging.DEBUG)
 def classify_video(video_uri: str) -> VideoClassification:
     logger.info(f"Starting classification for video '{video_uri}'")
 
-    with imageio.get_reader(video_uri) as video:  # type: Format.Reader
+    with imageio.get_reader(video_uri, "ffmpeg") as video:  # type: Format.Reader
         meta = video.get_meta_data()
         size = meta["size"]
         fps = meta["fps"]
@@ -64,7 +64,12 @@ def classify_video(video_uri: str) -> VideoClassification:
         t_start = time.time()
         with tqdm(total=length, desc=f"Classifying '{video_uri}'", dynamic_ncols=True, unit="frame") as bar:
             segment: Optional[Segment] = None
-            for i, frame in enumerate(video):
+            i = 0
+            while i < length:
+                try:
+                    frame = video.get_next_data()
+                except imageio.core.CannotReadFrameError:
+                    break
                 bar.update()
                 if scene_detector.update(frame):
                     if segment is not None:
@@ -84,6 +89,7 @@ def classify_video(video_uri: str) -> VideoClassification:
                     bboxes = detections[i]
                 objects = tracker.update(bboxes)
                 segment.append_objects(objects)
+                i += 1
 
             segment.end = length
             segment.scene = scene_classifier.classification()

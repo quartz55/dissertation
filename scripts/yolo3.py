@@ -33,6 +33,7 @@ def detect_and_save(img_uri: str, out_uri: str = None, net: YoloV3 = None):
 
 if __name__ == '__main__':
     net = yolo3_net()
-    detect_and_save(resources.image("yolo3-test1.jpg"), net=net)
-    detect_and_save(resources.image("yolo3-test2.jpg"), net=net)
-    detect_and_save(resources.image("yolo3-test3.jpg"), net=net)
+    detect_and_save(resources.image("people-1.jpg"), net=net)
+    # detect_and_save(resources.image("yolo3-test1.jpg"), net=net)
+    # detect_and_save(resources.image("yolo3-test2.jpg"), net=net)
+    # detect_and_save(resources.image("yolo3-test3.jpg"), net=net)

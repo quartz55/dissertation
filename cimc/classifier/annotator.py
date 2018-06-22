@@ -157,7 +157,9 @@ def scene_class_overlay(frame: np.ndarray, segment: Segment) -> Image:
     scene = segment.scene
     length, n_measures = scene.length, scene.num_measures
 
-    text = f"Segment: {segment.id}({start}-{end}) {end-start} frames({length} read, {n_measures} measured)\n" f"Type: {scene.type.name}\n" f"Categories:\n"
+    text = f"Segment: {segment.id}({start}-{end}) " \
+           f"{end-start} frames({length} read, {n_measures} measured)\n" \
+           f"Type: {scene.type.name}\n" f"Categories:\n"
     for _, label, conf in scene.categories[:5]:
         text += f"  - {label}({conf*100:.2f}%)\n"
     text += f"Attributes:\n"

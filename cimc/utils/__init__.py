@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import os
 from typing import Union
@@ -6,10 +7,6 @@ import numpy as np
 import torch
 from PIL import Image
 
-from . import downloader
-from . import bbox
-from . import log
-from . import vec
 from .bbox import BoundingBox
 from .vec import Vec
 
@@ -53,3 +50,11 @@ def simple_download(url: str, out: str = None, dir: str = None, force: bool = Fa
 
 def duration_str(seconds: float):
     return str(datetime.timedelta(seconds=seconds))
+
+
+def run_future_sync(future):
+    return asyncio.get_event_loop().run_until_complete(future)
+
+
+def mkdir_p(path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
