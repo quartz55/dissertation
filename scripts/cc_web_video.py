@@ -38,24 +38,6 @@ def path_for(video, base_dir: str):
     return os.path.join(base_dir, str(video["query_id"]), video["video_name"])
 
 
-def _evaluate(vid_dir, sim_thres, ndv_thres,
-              status, seed_clsf, video):
-    try:
-        clsf = get_clsf(video_uri=path_for(video, base_dir=vid_dir), force=False)
-    except ValueError:
-        return None
-
-    actual_similar = status in ['E', 'S', 'V', 'L']
-
-    sim_res = video_similarity(seed_clsf, clsf, threshold=sim_thres)
-    sim_val = np.mean(np.array([a[0][1] if len(a) > 0 else 0
-                                for a in sim_res.assignments]))
-    similar = np.bool(sim_val >= ndv_thres)
-
-    return Result(status, actual_similar, similar,
-                  int(similar == actual_similar), sim_res, float(sim_val))
-
-
 class CCWebVideoDataset:
     def __init__(self, root_dir: str = None):
         if root_dir is None:
@@ -203,7 +185,7 @@ async def prepare_query(query_id: int):
 
 
 def workbook():
-    query_id = 2
+    query_id = 20
     ds: CCWebVideoDataset = utils.run_future_sync(prepare_query(query_id))
     results = ds.run_for_query(query_id, ndv_thres=0.65, sim_thres=0.65)
     metrics = Metrics(query_id, results)

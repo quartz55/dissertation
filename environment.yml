@@ -9,6 +9,7 @@ dependencies:
   - pytorch::torchvision
   - numpy
   - numba
+  - pandas
   # - conda-forge::av
   - pip:
     - git+https://github.com/Breakthrough/PySceneDetect@master#egg=PySceneDetect
@@ -30,3 +31,5 @@ dependencies:
     - attrs
     - pytest
     - pyyaml
+    - plotnine
+    - psutil
