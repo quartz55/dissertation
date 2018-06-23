@@ -12,7 +12,7 @@ from tqdm import tqdm
 from cimc import resources, utils
 from cimc.classifier.annotator import annotate_video
 from cimc.classifier.utils import get_clsf
-from cimc.models import YoloV3
+from cimc.models import YoloV3_2 as YoloV3
 from cimc.models.yolov3.labels import COCO_LABELS
 from cimc.scene import SceneDetector
 from cimc.scene.classification import SceneClassifier
@@ -35,7 +35,10 @@ def classify_video(video_uri: str) -> VideoClassification:
         length = len(video)
         duration = utils.duration_str(length / fps)
 
-        logger.info(f"'{os.path.basename(video_uri)}' : " f"{size[0]}x{size[1]} {duration}({fps}fps {length} frames)")
+        logger.info(
+            f"'{os.path.basename(video_uri)}' : "
+            f"{size[0]}x{size[1]} {duration}({fps}fps {length} frames)"
+        )
 
         detections_uri = f"{video_uri}.dets"
         detections: List[List[bbox.BoundingBox]] = []
@@ -47,7 +50,10 @@ def classify_video(video_uri: str) -> VideoClassification:
                     detections = pickle.load(dets_fd)
                 gen_detections = False
             except pickle.UnpicklingError as e:
-                logger.warning(f"The detections file {detections_uri} " f"is invalid. YOLOv3 will be used")
+                logger.warning(
+                    f"The detections file {detections_uri} "
+                    f"is invalid. YOLOv3 will be used"
+                )
 
         scene_detector = SceneDetector(downscale=4, min_length=int(fps))
 
@@ -56,13 +62,20 @@ def classify_video(video_uri: str) -> VideoClassification:
         yolov3_net: Optional[YoloV3] = None
         if gen_detections:
             yolov3_net = YoloV3.pre_trained().to(utils.best_device)
-            pp = tf.Compose([bbox.ReverseScale(size[0], size[1]), bbox.FromYoloOutput(COCO_LABELS)])
+            pp = tf.Compose(
+                [bbox.ReverseScale(*size), bbox.FromYoloOutput(COCO_LABELS)]
+            )
 
         tracker = MultiTracker(max_age=int(fps), min_hits=int(fps / 2), iou_thres=0.35)
 
         clsf = VideoClassification(video_uri, metadata=meta)
         t_start = time.time()
-        with tqdm(total=length, desc=f"Classifying '{video_uri}'", dynamic_ncols=True, unit="frame") as bar:
+        with tqdm(
+            total=length,
+            desc=f"Classifying '{video_uri}'",
+            dynamic_ncols=True,
+            unit="frame",
+        ) as bar:
             segment: Optional[Segment] = None
             i = 0
             while i < length:
@@ -83,7 +96,12 @@ def classify_video(video_uri: str) -> VideoClassification:
                 scene_classifier.update(frame)
 
                 if gen_detections:
-                    bboxes = [pp(box) for box in yolov3_net.detect(frame)[0]]
+                    boxes = yolov3_net.detect(frame)[0][0]
+                    # print(len(boxes))
+                    # print(boxes[0])
+                    # print("------ CONVERTING TO BoundingBox ------")
+                    bboxes = [pp(box) for box in boxes]
+                    # print(bboxes[0])
                     detections.append(bboxes)
                 else:
                     bboxes = detections[i]
@@ -103,7 +121,9 @@ def classify_video(video_uri: str) -> VideoClassification:
             logger.debug(f"Saved YOLOv3 detections as '{detections_uri}'")
 
         time_taken = utils.duration_str(t_end - t_start)
-        logger.info(f"Finished classifying '{video_uri}' in {time_taken} (found {len(clsf.segments)} scenes)")
+        logger.info(
+            f"Finished classifying '{video_uri}' in {time_taken} (found {len(clsf.segments)} scenes)"
+        )
 
         return clsf
 
@@ -124,11 +144,12 @@ if __name__ == "__main__":
     # except:
     #     pass
     # get_clsf(video_uri=resources.video('goldeneye-justiceleague.mp4'))
-    classify_and_annotate(resources.video("Venice-1.bk.mp4"))
+    # classify_and_annotate(resources.video("Venice-1.bk.mp4"))
     # classify_and_annotate(resources.video('goldeneye-justiceleague.mp4'))
     # classify_and_annotate(resources.video('goldeneye.mp4'))
-    # classify_and_annotate(resources.video('goldeneye-2x.mp4'))
+    # classify_and_annotate(resoUrces.video('goldeneye-2x.mp4'))
     # classify_and_annotate(resources.video('TUD-Campus.mp4'))
+    classify_and_annotate(resources.video("TUD-Campus.mp4"))
     # classify_and_annotate(resources.video('TUD-Campus.var.rotate-scale.mp4'))
     # classify_and_annotate(resources.video('TUD-Crossing.mp4'))
     # classify_and_annotate(resources.video('ADL-Rundle-8.mp4'))

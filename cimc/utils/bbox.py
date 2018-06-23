@@ -41,14 +41,18 @@ def iou(bb_a, bb_b):
 
 
 class BoundingBox:
-    __slots__ = ['_data', 'class_name']
+    __slots__ = ["_data", "class_name"]
 
-    def __init__(self, box: Tuple[Point, Point],
-                 class_id: int = -1, name: str = None,
-                 confidence: float = -1):
-        self._data: np.ndarray = np.array([*box[0], *box[1],
-                                           confidence, class_id],
-                                          dtype=np.double)
+    def __init__(
+        self,
+        box: Tuple[Point, Point],
+        class_id: int = -1,
+        name: str = None,
+        confidence: float = -1,
+    ):
+        self._data: np.ndarray = np.array(
+            [*box[0], *box[1], confidence, class_id], dtype=np.double
+        )
         self.class_name: Optional[str] = name
 
     @property
@@ -118,11 +122,8 @@ class BoundingBox:
     @classmethod
     def from_yolo(cls, box: List[float], labels: List[str] = None):
         """In the format [x, y, w, h] (center with width and height)"""
-        x1 = box[0] - box[2] / 2
-        y1 = box[1] - box[3] / 2
-        x2 = box[0] + box[2] / 2
-        y2 = box[1] + box[3] / 2
-        class_id = int(box[5])
+        x1, y1, x2, y2 = box[:4]
+        class_id = int(box[6])
         class_name = labels[class_id] if labels is not None else None
         return cls((Point(x1, y1), Point(x2, y2)), class_id, class_name, box[4].item())
 
@@ -144,10 +145,10 @@ class ReverseScale:
         self.height = height
 
     def __call__(self, box: List[float]) -> List[float]:
-        box[0] *= self.width
-        box[1] *= self.height
-        box[2] *= self.width
-        box[3] *= self.height
+        box[0] = box[0] / 416 * self.width
+        box[1] = box[1] / 416 * self.height
+        box[2] = box[2] / 416 * self.width
+        box[3] = box[3] / 416 * self.height
         return box
 
 
