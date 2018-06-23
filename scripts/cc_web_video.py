@@ -2,6 +2,7 @@ import logging
 import os
 from typing import Optional, Dict
 from zipfile import ZipFile
+import argparse
 
 import aiohttp
 import attr
@@ -185,12 +186,24 @@ async def prepare_query(query_id: int):
 
 
 def workbook():
-    query_id = 20
+    parser = argparse.ArgumentParser(description='CC_WEB_VIDEO dataset script')
+    parser.add_argument('task', type=str, choices=['classify', 'ndvd'],
+                               help='Task to run [classify,ndvd]')
+    parser.add_argument('query_id', type=int, choices=range(1,25),
+                               help='QueryID from 1-24')
+    args = parser.parse_args()
+    query_id = args.query_id
     ds: CCWebVideoDataset = utils.run_future_sync(prepare_query(query_id))
-    results = ds.run_for_query(query_id, ndv_thres=0.65, sim_thres=0.65)
-    metrics = Metrics(query_id, results)
-    conf_matrix = metrics.conf_matrix()
-    report = metrics.report()
+    print(args)
+    if args.task == 'classify':
+        results = ds.classify_for_query(query_id)
+    elif args.task == 'ndvd':
+        results = ds.run_for_query(query_id, ndv_thres=0.65, sim_thres=0.65)
+        metrics = Metrics(query_id, results)
+        conf_matrix = metrics.conf_matrix()
+        report = metrics.report()
+        print(conf_matrix)
+        print(report)
     pass
 
 

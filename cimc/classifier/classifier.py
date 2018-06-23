@@ -8,6 +8,7 @@ import imageio
 from imageio.core import Format
 from torchvision.transforms import transforms as tf
 from tqdm import tqdm
+import torch
 
 from cimc import resources, utils
 from cimc.classifier.annotator import annotate_video
@@ -18,12 +19,13 @@ from cimc.scene import SceneDetector
 from cimc.scene.classification import SceneClassifier
 from cimc.tracker import MultiTracker
 from cimc.utils import bbox, log
-from .classification import VideoClassification, Segment
+from cimc.classifier.classification import VideoClassification, Segment
 
 logger = logging.getLogger(__name__)
 logger.addHandler(log.TqdmLoggingHandler())
 logger.setLevel(logging.DEBUG)
 
+torch.set_num_threads(1)
 
 def classify_video(video_uri: str) -> VideoClassification:
     logger.info(f"Starting classification for video '{video_uri}'")
@@ -96,13 +98,14 @@ def classify_video(video_uri: str) -> VideoClassification:
                 scene_classifier.update(frame)
 
                 if gen_detections:
-                    boxes = yolov3_net.detect(frame)[0][0]
-                    # print(len(boxes))
-                    # print(boxes[0])
-                    # print("------ CONVERTING TO BoundingBox ------")
-                    bboxes = [pp(box) for box in boxes]
-                    # print(bboxes[0])
+                    boxes = [b for b in yolov3_net.detect(frame)[0] if b is not None]
+                    # print(len(boxes), boxes)
+                    bboxes = []
+                    for dets in boxes:
+                        bboxes += [pp(box) for box in dets]
                     detections.append(bboxes)
+                    # bboxes = [pp(box) for box in dets for dets in boxes]
+                    # detections.append(bboxes)
                 else:
                     bboxes = detections[i]
                 objects = tracker.update(bboxes)
@@ -149,7 +152,7 @@ if __name__ == "__main__":
     # classify_and_annotate(resources.video('goldeneye.mp4'))
     # classify_and_annotate(resoUrces.video('goldeneye-2x.mp4'))
     # classify_and_annotate(resources.video('TUD-Campus.mp4'))
-    classify_and_annotate(resources.video("TUD-Campus.mp4"))
+    get_clsf(video_uri=resources.video("TUD-Campus.mp4"))
     # classify_and_annotate(resources.video('TUD-Campus.var.rotate-scale.mp4'))
     # classify_and_annotate(resources.video('TUD-Crossing.mp4'))
     # classify_and_annotate(resources.video('ADL-Rundle-8.mp4'))
