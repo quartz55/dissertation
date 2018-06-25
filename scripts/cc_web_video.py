@@ -1,8 +1,8 @@
+import argparse
 import logging
 import os
 from typing import Optional, Dict
 from zipfile import ZipFile
-import argparse
 
 import aiohttp
 import attr
@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import sklearn.metrics
 from aiostream import stream
+from plotnine import *
 
 from cimc import utils
 from cimc.classifier.utils import get_clsf
@@ -23,12 +24,12 @@ logger.setLevel(logging.DEBUG)
 
 @attr.s(slots=True, frozen=True)
 class Result:
+    query_id: int = attr.ib()
+    video_id: int = attr.ib()
     status: str = attr.ib()
     actual: bool = attr.ib()
-    predicted: bool = attr.ib()
-    value: int = attr.ib()
+    similarity: float = attr.ib()
     _sim_res: Optional[SimilarityResult] = attr.ib()
-    _sim_val: Optional[float] = attr.ib()
 
 
 def rel_path(path: str) -> str:
@@ -51,7 +52,7 @@ class CCWebVideoDataset:
         self.seeds: Optional[pd.DataFrame] = None
         self.shots: Optional[pd.DataFrame] = None
 
-    def run_for_query(self, query_id: int, ndv_thres: float = 0.65, sim_thres: float = 0.65):
+    def run_for_query(self, query_id: int, sim_thres: float = 0.65):
         vid_dir = os.path.join(self.root_dir, "videos")
         seed_video_id = self.seeds.loc[str(query_id)]["seed_video_id"]
         seed_video = self.videos.loc[seed_video_id]
@@ -71,7 +72,7 @@ class CCWebVideoDataset:
             try:
                 clsf = get_clsf(video_uri=path_for(video, base_dir=vid_dir), force=False)
             except ValueError:
-                return None
+                continue
 
             status = truth["status"]
             actual_similar = status in ['E', 'S', 'V', 'L']
@@ -79,10 +80,10 @@ class CCWebVideoDataset:
             sim_res = video_similarity(seed_clsf, clsf, threshold=sim_thres)
             sim_val = np.mean(np.array([a[0][1] if len(a) > 0 else 0
                                         for a in sim_res.assignments]))
-            similar = np.bool(sim_val >= ndv_thres)
 
-            results[video_id] = Result(status, actual_similar, similar,
-                                       int(similar == actual_similar), sim_res, float(sim_val))
+            results[video_id] = Result(query_id, video_id,
+                                       status, actual_similar,
+                                       float(sim_val), sim_res)
         return results
 
     def classify_for_query(self, query_id: int):
@@ -164,8 +165,7 @@ class CCWebVideoDataset:
 
 
 class Metrics:
-    def __init__(self, query_id: int, results: Dict[int, Result]):
-        self.query_id = query_id
+    def __init__(self, results: Dict[int, Result]):
         self.results = results
         self._results_np = np.array([[r.actual, r.predicted]
                                      for r in results.values()])
@@ -185,25 +185,57 @@ async def prepare_query(query_id: int):
         return ds
 
 
+def conf_matrix_plot(conf_matrix):
+    df = pd.DataFrame({"actual": ["false", "false", "true", "true"],
+                       "predicted": ["false", "true", "false", "true"],
+                       "entries": np.hstack(conf_matrix)})
+    text_color = np.array(["black"] * len(df))
+    text_color[df["entries"] < np.sum(df["entries"]) / 2] = "white"
+    return (ggplot(df, aes(x="actual", y="predicted", fill="entries")) +
+            geom_tile() +
+            geom_text(aes(label="entries"), size=32, color=text_color) +
+            labs(title="Confusion Matrix",
+                 x="Actual",
+                 y="Predicted"))
+
+
+def calculate_roc_curve(results):
+    results_np = np.array([[r.actual, r.similarity]
+                           for r in results.values()])
+
+    fpr, tpr, thres = sklearn.metrics.roc_curve(results_np[:,0], results_np[:, 1])
+    roc = pd.DataFrame({"threshold": thres,
+                        "fpr": fpr,
+                        "tpr": tpr})
+    return roc
+
+
+def roc_curve_plot(measures):
+    return (ggplot(measures, aes(x="fpr", y="tpr")) +
+            geom_line(size=2, alpha=0.7, color="orange") +
+            geom_point(alpha=0.35) +
+            labs(title="ROC Curve",
+                 x="False Positive Rate",
+                 y="True Positive Rate"))
+
+
 def workbook():
     parser = argparse.ArgumentParser(description='CC_WEB_VIDEO dataset script')
     parser.add_argument('task', type=str, choices=['classify', 'ndvd'],
-                               help='Task to run [classify,ndvd]')
-    parser.add_argument('query_id', type=int, choices=range(1,25),
-                               help='QueryID from 1-24')
+                        help='Task to run [classify,ndvd]')
+    parser.add_argument('query_id', type=int, choices=range(1, 25),
+                        help='QueryID from 1-24')
     args = parser.parse_args()
     query_id = args.query_id
     ds: CCWebVideoDataset = utils.run_future_sync(prepare_query(query_id))
     print(args)
     if args.task == 'classify':
-        results = ds.classify_for_query(query_id)
+        ds.classify_for_query(query_id)
     elif args.task == 'ndvd':
-        results = ds.run_for_query(query_id, ndv_thres=0.65, sim_thres=0.65)
-        metrics = Metrics(query_id, results)
-        conf_matrix = metrics.conf_matrix()
-        report = metrics.report()
-        print(conf_matrix)
-        print(report)
+        results = ds.run_for_query(query_id, sim_thres=0.65)
+        roc = calculate_roc_curve(results)
+        roc_curve_plot(roc).draw().show()
+        pass
     pass
 
 
