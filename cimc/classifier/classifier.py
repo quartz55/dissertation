@@ -5,13 +5,14 @@ import time
 from typing import List, Optional
 
 import imageio
+import torch
 from imageio.core import Format
 from torchvision.transforms import transforms as tf
 from tqdm import tqdm
-import torch
 
 from cimc import resources, utils
 from cimc.classifier.annotator import annotate_video
+from cimc.classifier.classification import VideoClassification, Segment
 from cimc.classifier.utils import get_clsf
 from cimc.models import YoloV3_2 as YoloV3
 from cimc.models.yolov3.labels import COCO_LABELS
@@ -19,13 +20,13 @@ from cimc.scene import SceneDetector
 from cimc.scene.classification import SceneClassifier
 from cimc.tracker import MultiTracker
 from cimc.utils import bbox, log
-from cimc.classifier.classification import VideoClassification, Segment
 
 logger = logging.getLogger(__name__)
 logger.addHandler(log.TqdmLoggingHandler())
 logger.setLevel(logging.DEBUG)
 
 torch.set_num_threads(1)
+
 
 def classify_video(video_uri: str) -> VideoClassification:
     logger.info(f"Starting classification for video '{video_uri}'")
@@ -73,10 +74,10 @@ def classify_video(video_uri: str) -> VideoClassification:
         clsf = VideoClassification(video_uri, metadata=meta)
         t_start = time.time()
         with tqdm(
-            total=length,
-            desc=f"Classifying '{video_uri}'",
-            dynamic_ncols=True,
-            unit="frame",
+                total=length,
+                desc=f"Classifying '{video_uri}'",
+                dynamic_ncols=True,
+                unit="frame",
         ) as bar:
             segment: Optional[Segment] = None
             i = 0

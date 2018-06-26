@@ -1,7 +1,7 @@
 import argparse
 import logging
 import os
-from typing import Optional, Dict
+from typing import Optional
 from zipfile import ZipFile
 
 import aiohttp
@@ -14,22 +14,12 @@ from plotnine import *
 
 from cimc import utils
 from cimc.classifier.utils import get_clsf
-from cimc.similarity import video_similarity, SimilarityResult
+from cimc.similarity import video_similarity
 from cimc.utils import log, downloader
 
 logger = logging.getLogger(__name__)
 logger.addHandler(log.TqdmLoggingHandler())
 logger.setLevel(logging.DEBUG)
-
-
-@attr.s(slots=True, frozen=True)
-class Result:
-    query_id: int = attr.ib()
-    video_id: int = attr.ib()
-    status: str = attr.ib()
-    actual: bool = attr.ib()
-    similarity: float = attr.ib()
-    _sim_res: Optional[SimilarityResult] = attr.ib()
 
 
 def rel_path(path: str) -> str:
@@ -54,7 +44,7 @@ class CCWebVideoDataset:
 
     def run_for_query(self, query_id: int, sim_thres: float = 0.65):
         vid_dir = os.path.join(self.root_dir, "videos")
-        seed_video_id = self.seeds.loc[str(query_id)]["seed_video_id"]
+        seed_video_id = int(self.seeds.loc[str(query_id)]["seed_video_id"])
         seed_video = self.videos.loc[seed_video_id]
         seed_clsf = get_clsf(video_uri=path_for(seed_video, base_dir=vid_dir))
         gt = pd.read_csv(
@@ -65,15 +55,14 @@ class CCWebVideoDataset:
             index_col=0,
         )
 
-        results: Dict[int, Result] = {}
+        results = []
         for video_id, truth in gt.iterrows():
             video = self.videos.loc[video_id]
 
             try:
                 clsf = get_clsf(video_uri=path_for(video, base_dir=vid_dir), force=False)
-            except ValueError:
+            except (FileNotFoundError, ValueError):
                 continue
-
             status = truth["status"]
             actual_similar = status in ['E', 'S', 'V', 'L']
 
@@ -81,9 +70,14 @@ class CCWebVideoDataset:
             sim_val = np.mean(np.array([a[0][1] if len(a) > 0 else 0
                                         for a in sim_res.assignments]))
 
-            results[video_id] = Result(query_id, video_id,
-                                       status, actual_similar,
-                                       float(sim_val), sim_res)
+            results.append({"query_id": query_id,
+                            "video_id": video_id,
+                            "seed_id": seed_video_id,
+                            "status": status,
+                            "actual": actual_similar,
+                            "similarity": np.float(sim_val)})
+        results = pd.DataFrame(results)
+        results.set_index(["video_id", "query_id"], inplace=True)
         return results
 
     def classify_for_query(self, query_id: int):
@@ -164,62 +158,140 @@ class CCWebVideoDataset:
         await stream.merge(stream.just(others), stream.just(_gt_aux()))
 
 
-class Metrics:
-    def __init__(self, results: Dict[int, Result]):
-        self.results = results
-        self._results_np = np.array([[r.actual, r.predicted]
-                                     for r in results.values()])
-
-    def conf_matrix(self):
-        actual, predicted = self._results_np.T
-        return sklearn.metrics.confusion_matrix(actual, predicted)
-
-    def report(self):
-        actual, predicted = self._results_np.T
-        return sklearn.metrics.classification_report(actual, predicted)
-
-
 async def prepare_query(query_id: int):
     async with CCWebVideoDataset() as ds:
         await ds.download_videos(ds.videos_from_query(query_id), os.path.join(ds.root_dir, "videos"))
         return ds
 
 
-def conf_matrix_plot(conf_matrix):
-    df = pd.DataFrame({"actual": ["false", "false", "true", "true"],
-                       "predicted": ["false", "true", "false", "true"],
-                       "entries": np.hstack(conf_matrix)})
-    text_color = np.array(["black"] * len(df))
-    text_color[df["entries"] < np.sum(df["entries"]) / 2] = "white"
-    return (ggplot(df, aes(x="actual", y="predicted", fill="entries")) +
+def conf_matrix_plot(conf_df):
+    text_color = np.array(["black"] * len(conf_df))
+    text_color[conf_df["entries"] < np.max(conf_df["entries"]) / 2] = "white"
+    return (ggplot(conf_df, aes(x="actual", y="predicted", fill="entries")) +
             geom_tile() +
+            scale_fill_gradient() +
             geom_text(aes(label="entries"), size=32, color=text_color) +
             labs(title="Confusion Matrix",
                  x="Actual",
                  y="Predicted"))
 
 
-def calculate_roc_curve(results):
-    results_np = np.array([[r.actual, r.similarity]
-                           for r in results.values()])
+def confusion_matrix(predictions: pd.DataFrame, dataframe=False):
+    conf_matrix = sklearn.metrics.confusion_matrix(predictions["actual"], predictions["predicted"])
+    if dataframe:
+        return pd.DataFrame({"actual": ["false", "false", "true", "true"],
+                             "predicted": ["false", "true", "false", "true"],
+                             "entries": np.hstack(conf_matrix)})
+    return conf_matrix
 
-    fpr, tpr, thres = sklearn.metrics.roc_curve(results_np[:,0], results_np[:, 1])
+
+@attr.s(slots=True, frozen=True)
+class Report:
+    precision: float = attr.ib()
+    recall: float = attr.ib()
+    F1: float = attr.ib()
+    TP: int = attr.ib()
+    TN: int = attr.ib()
+    FP: int = attr.ib()
+    FN: int = attr.ib()
+
+
+def prediction_report(predictions):
+    conf_mat = confusion_matrix(predictions)
+    TP = conf_mat[1][1]
+    TN = conf_mat[0][0]
+    FP = conf_mat[0][1]
+    FN = conf_mat[1][0]
+
+    total_pos = TP + FP
+    tp_fn = TP + FN
+
+    precision = 0 if total_pos == 0 else TP / total_pos
+    recall = 0 if tp_fn == 0 else TP / tp_fn
+    F1 = 2 * (precision * recall) / (precision + recall)
+    return Report(precision, recall, F1,
+                  TP, TN, FP, FN)
+
+
+def calculate_roc_curve(results):
+    fpr, tpr, thres = sklearn.metrics.roc_curve(results["actual"], results["similarity"])
     roc = pd.DataFrame({"threshold": thres,
                         "fpr": fpr,
                         "tpr": tpr})
     return roc
 
 
-def roc_curve_plot(measures):
-    return (ggplot(measures, aes(x="fpr", y="tpr")) +
+def roc_curve_plot(measures, points=True):
+    plot = (ggplot(measures, aes(x="fpr", y="tpr")) +
             geom_line(size=2, alpha=0.7, color="orange") +
-            geom_point(alpha=0.35) +
             labs(title="ROC Curve",
                  x="False Positive Rate",
                  y="True Positive Rate"))
+    if points:
+        plot += geom_point(alpha=0.35, stroke=0)
+    return plot
+
+
+def get_best_thres(roc):
+    aux = roc.assign(max=roc["tpr"] - roc["fpr"])
+    return aux.loc[aux["max"].idxmax()]
+
+
+async def grab_results(queries):
+    acc = {}
+    for query_id in queries:
+        async with CCWebVideoDataset() as ds:
+            results = ds.run_for_query(query_id, sim_thres=0.65)
+            results.to_csv(f"query_{query_id}.results.csv")
+            acc[query_id] = results
+    return acc
+
+
+def cell1():
+    res = pd.DataFrame()
+    for i in [1, 2, 4, 7, 13, 14, 20]:
+        res = res.append(pd.read_csv(f"query_{i}.results.csv"))
+    roc = calculate_roc_curve(res)
+    best_thres = get_best_thres(roc)
+    thres = best_thres["threshold"]
+    preds = res.assign(predicted=res["similarity"] >= thres)
+    conf_df = confusion_matrix(preds, dataframe=True)
+
+    roc_plot = (roc_curve_plot(roc, points=False) +
+                ggtitle(f"ROC Curve"))
+    (roc_plot + theme_538()).save(f"all_538.roc.jpg")
+    (roc_plot + theme_seaborn()).save(f"all_seaborn.roc.jpg")
+
+    conf_plot = (conf_matrix_plot(conf_df) +
+                 ggtitle(f"Confusion Matrix (thres={thres:.2f})"))
+    (conf_plot + theme_538()).save(f"all_538.conf.jpg")
+    (conf_plot + theme_seaborn()).save(f"all_seaborn.conf.jpg")
+
+
+def cell2():
+    for i in [1, 2, 4, 7, 13, 14, 20]:
+        res = pd.read_csv(f"query_{i}.results.csv")
+        roc = calculate_roc_curve(res)
+        best_thres = get_best_thres(roc)
+        thres = best_thres["threshold"]
+        print(best_thres, thres)
+        preds = res.assign(predicted=res["similarity"] >= thres)
+        conf_df = confusion_matrix(preds, dataframe=True)
+
+        roc_plot = (roc_curve_plot(roc) +
+                    ggtitle(f"ROC Curve (query={i})"))
+        (roc_plot + theme_538()).save(f"query_{i}_538.roc.jpg")
+        (roc_plot + theme_seaborn()).save(f"query_{i}_seaborn.roc.jpg")
+
+        conf_plot = (conf_matrix_plot(conf_df) +
+                     ggtitle(f"Confusion Matrix (query={i}, thres={thres:.2f})"))
+        (conf_plot + theme_538()).save(f"query_{i}_538.conf.jpg")
+        (conf_plot + theme_seaborn()).save(f"query_{i}_seaborn.conf.jpg")
 
 
 def workbook():
+    # utils.run_future_sync(grab_results([1, 2, 4, 7, 13, 14, 20]))
+
     parser = argparse.ArgumentParser(description='CC_WEB_VIDEO dataset script')
     parser.add_argument('task', type=str, choices=['classify', 'ndvd'],
                         help='Task to run [classify,ndvd]')
@@ -233,10 +305,12 @@ def workbook():
         ds.classify_for_query(query_id)
     elif args.task == 'ndvd':
         results = ds.run_for_query(query_id, sim_thres=0.65)
+        pred_65 = results.assign(predicted=results["similarity"] >= 0.65)
+        conf_matrix_65 = confusion_matrix(results, 0.65)
+        conf_df_65 = confusion_matrix(results, 0.65, dataframe=True)
         roc = calculate_roc_curve(results)
         roc_curve_plot(roc).draw().show()
         pass
-    pass
 
 
 if __name__ == "__main__":

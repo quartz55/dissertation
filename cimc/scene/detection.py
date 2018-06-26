@@ -59,7 +59,7 @@ def is_cut(frames: np.ndarray, threshold: float = 30.0) -> bool:
     delta_hsv = np.mean(np.mean(np.abs(frame_2_hsv - frame_1_hsv), axis=0), axis=0)
     delta_hsv_avg = np.sum(delta_hsv) / 3.0
 
-    return delta_hsv_avg >= threshold
+    return np.bool(delta_hsv_avg >= threshold)
 
 
 def is_cut_tensor(frames: np.ndarray, threshold: float = 30.0) -> bool:
