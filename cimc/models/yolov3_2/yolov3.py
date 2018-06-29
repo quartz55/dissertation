@@ -7,11 +7,14 @@ from torchvision.transforms import transforms as tf
 
 import cimc.utils as utils
 from cimc import resources
+from cimc.utils import bench
 from .models import Darknet
 from .utils.utils import non_max_suppression
 
 YOLOV3_WEIGHTS_URL = "https://pjreddie.com/media/files/yolov3.weights"
 YOLOV3_CFG = os.path.join(os.path.dirname(__file__), "yolov3.cfg")
+
+_bench = bench.Bench("yolov3")
 
 
 class YoloV3(Darknet):
@@ -22,15 +25,17 @@ class YoloV3(Darknet):
         )
 
     def detect(self, image: utils.ImageType, confidence=0.25, nms_thres=0.4):
+        m = _bench.measurements()
+        t0 = time.time()
         if not isinstance(image, Image.Image):
             pp = lambda i: self.pre_process(tf.ToPILImage()(i))
         else:
             pp = self.pre_process
-        device = next(self.parameters()).device
+
         if self.training:
             self.eval()
 
-        t0 = time.time()
+        device = next(self.parameters()).device
         img_input = pp(image).unsqueeze(0).to(device)
         t1 = time.time()
 
@@ -55,6 +60,11 @@ class YoloV3(Darknet):
                 "nms": t3 - t2,
                 "total": t3 - t0,
             }
+            (m
+             .add("pre.process", timings["pre_process"])
+             .add("region.proposal", timings["predict"])
+             .add("nms", timings["nms"])
+             .add("iteration", timings["total"])).done()
             return detections, timings
 
     @classmethod

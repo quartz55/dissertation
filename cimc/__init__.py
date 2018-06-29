@@ -1,5 +1,6 @@
 import logging
 
-l = logging.getLogger(__name__)
-l.addHandler(logging.NullHandler())
-l.setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+logger.setLevel(logging.INFO)
+logger.addFilter(lambda record: print("Filter:", record))

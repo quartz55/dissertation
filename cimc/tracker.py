@@ -2,9 +2,11 @@ from typing import List, Tuple, Dict
 
 import attr
 import numpy as np
+import time
 from filterpy.kalman import KalmanFilter
 from sklearn.utils.linear_assignment_ import linear_assignment
 
+from cimc.utils import bench
 from cimc.utils.bbox import BoundingBox, Point
 
 
@@ -144,6 +146,7 @@ class Tracker:
         self.iou_thres = iou_thres
         self.trackers: List[KalmanBoxTracker] = []
         self.curr_frame = 0
+        self._bench = bench.Bench("object.tracker")
 
     def _match_trackers(self, bboxes: List[BoundingBox]):
         """
@@ -181,6 +184,7 @@ class Tracker:
         return Matches(matches, np.array(new_matches), np.array(no_matches))
 
     def update(self, bboxes):
+        t0 = time.time()
         self.curr_frame += 1
 
         # Kalman Filter predict step
@@ -190,14 +194,20 @@ class Tracker:
             except InvalidPrediction:
                 self.trackers.pop(i)
 
+        t1 = time.time()
+
         # Match predicted bboxes to measured bboxes using IoU
         mr = self._match_trackers(bboxes)
+
+        t2 = time.time()
 
         # Kalman Filter update step
         for t, tracker in enumerate(self.trackers):
             if t not in mr.no_matches:
                 d = mr.matches[np.where(mr.matches[:, 1] == t)[0], 0]
                 tracker.update(bboxes[d[0]])
+
+        t3 = time.time()
 
         # Start tracking unmatched bboxes
         for i in mr.new_matches:
@@ -223,6 +233,13 @@ class Tracker:
             if (tracker.hits >= self.min_hits
                     or tracker.hit_streak >= 3):
                 ret.append(TrackedBoundingBox.from_bbox(tracker.bbox(), tracker.id))
+
+        (self._bench.measurements()
+         .add("predict.step", t1 - t0)
+         .add("kf.iou.match", t2 - t1)
+         .add("update.step", t3 - t2)
+         .add("post.process", time.time() - t3)).done()
+
         return ret
 
 
@@ -233,14 +250,19 @@ class MultiTracker:
         self.iou_thres = iou_thres
         self.curr_frame = 0
         self.trackers: Dict[int, Tracker] = {}
+        self._bench = bench.Bench("multi.tracker")
 
     def update(self, bboxes) -> Dict[int, List[TrackedBoundingBox]]:
+        t0 = time.time()
+
         per_class = {cls: [] for cls in self.trackers}
         for bbox in bboxes:
             if bbox.class_id in per_class:
                 per_class[bbox.class_id].append(bbox)
             else:
                 per_class[bbox.class_id] = [bbox]
+
+        t1 = time.time()
 
         tracked = {}
         for cls, bbs in per_class.items():
@@ -250,6 +272,11 @@ class MultiTracker:
                 self.trackers[cls] = tracker
             tracked[cls] = self.trackers[cls].update(bbs)
         self.curr_frame += 1
+
+        (self._bench.measurements()
+            .add("pre.process", t1 - t0)
+            .add("trackers.update", time.time() - t1)).done()
+
         return tracked
 
     def reset(self):

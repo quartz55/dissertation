@@ -247,9 +247,12 @@ async def grab_results(queries):
     return acc
 
 
+QUERIES_DONE = [1, 2, 7, 13, 14, 16, 20]
+
+
 def cell1():
     res = pd.DataFrame()
-    for i in [1, 2, 4, 7, 13, 14, 20]:
+    for i in QUERIES_DONE:
         res = res.append(pd.read_csv(f"query_{i}.results.csv"))
     roc = calculate_roc_curve(res)
     best_thres = get_best_thres(roc)
@@ -269,7 +272,7 @@ def cell1():
 
 
 def cell2():
-    for i in [1, 2, 4, 7, 13, 14, 20]:
+    for i in QUERIES_DONE:
         res = pd.read_csv(f"query_{i}.results.csv")
         roc = calculate_roc_curve(res)
         best_thres = get_best_thres(roc)

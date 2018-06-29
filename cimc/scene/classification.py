@@ -1,3 +1,5 @@
+import time
+
 import attr
 import imageio
 import numpy as np
@@ -6,6 +8,7 @@ from tqdm import tqdm
 import cimc.models.places.labels as lbl
 from cimc import resources, utils
 from cimc.models.places.places import Places365, SceneType
+from cimc.utils import bench
 
 
 @attr.s(slots=True, frozen=True)
@@ -42,16 +45,24 @@ class SceneClassifier:
         self._results = []
         self._probs_cats = np.zeros(len(lbl.CATEGORIES))
         self._attrs_acc = np.zeros(len(lbl.ATTRIBUTES))
+        self._bench = bench.Bench("scene.recogn")
 
     def update(self, frame: np.ndarray):
+        t0 = time.time()
         self._frames_read += 1
         if self._frames_read - 1 < self._next_frame:
+            self._bench.measurement("iteration", time.time() - t0)
             return
+
+        t1 = time.time()
         res = self.places_net.classify(frame)
+        self._bench.measurement("forward.pass", time.time() - t1)
+
         self._probs_cats[res.categories['id']] += res.categories['confidence']
         self._attrs_acc[res.attributes['id']] += 1
         self._results.append(res)
         self._next_frame += self._step
+        self._bench.measurement("iteration", time.time() - t0)
 
     def classification(self):
         types = np.array([r.type.value for r in self._results])
@@ -111,4 +122,6 @@ def test_classify_scene():
 
 
 if __name__ == '__main__':
-    test_classify_scene()
+    classify_scene(resources.video("goldeneye.mp4"))
+    classify_scene(resources.video("goldeneye-2x.mp4"))
+    classify_scene(resources.video("goldeneye-justiceleague.mp4"))
