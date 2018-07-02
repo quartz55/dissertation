@@ -13,8 +13,9 @@ from torchvision.transforms import transforms as tf
 import cimc.resources as resources
 import cimc.utils as utils
 import cimc.utils.downloader as downloader
+from cimc.utils import bench
 from . import labels as lbl
-from .wideresnet import WideResNet, BasicBlock, Bottleneck
+from .wideresnet import WideResNet, BasicBlock
 
 
 class SceneType(int, Enum):
@@ -64,6 +65,9 @@ class PlacesClassification:
         return tmp
 
 
+_bench = bench.Bench("places365")
+
+
 class Places365(WideResNet):
     def __init__(self):
         # 18 layers
@@ -85,6 +89,8 @@ class Places365(WideResNet):
         )
 
     def classify(self, image: utils.ImageType) -> PlacesClassification:
+        t0 = time.time()
+
         img = utils.to_image(image)
 
         if self.training:
@@ -106,12 +112,16 @@ class Places365(WideResNet):
         weight_softmax = params[-2].data.cpu().numpy()
         weight_softmax[weight_softmax < 0] = 0
         curr_device = params[0].device if len(params) > 0 else utils.best_device
+
         t1 = time.time()
+
         img_input = self.pre_process(img).unsqueeze(0).to(curr_device)
 
         with torch.no_grad():
             t2 = time.time()
+
             logit = self(img_input)
+
             t3 = time.time()
 
             h_x = F.softmax(logit, 1).data.squeeze()
@@ -125,6 +135,7 @@ class Places365(WideResNet):
             responses_attribute = lbl.ATTRIBUTES["weights"].dot(features["avgpool"])
             attrs_idx = np.argsort(responses_attribute)
             top_10_attrs = lbl.ATTRIBUTES[attrs_idx[-1:-10:-1]]
+
             t4 = time.time()
 
             env_type = SceneType.INDOOR if io_image < 0.5 else SceneType.OUTDOOR
@@ -132,19 +143,21 @@ class Places365(WideResNet):
                 (
                     (id, label, conf)
                     for (id, label), conf in zip(
-                        top_5_cats[["id", "label"]], probs_cats[:5]
-                    )
+                    top_5_cats[["id", "label"]], probs_cats[:5]
+                )
                 ),
                 dtype=category_pred_type,
             )
             attributes = top_10_attrs[["id", "label"]].astype(attribute_pred_type)
+
             t5 = time.time()
             timings = {
+                "setup": t1 - t0,
                 "pre_process": t2 - t1,
                 "forward_pass": t3 - t2,
                 "result_prep": t4 - t3,
                 "result_creation": t5 - t4,
-                "total": t5 - t1,
+                "total": t5 - t0,
             }
             result = PlacesClassification(
                 type=env_type,
@@ -154,6 +167,12 @@ class Places365(WideResNet):
             )
             for h in hooks.values():
                 h.remove()
+
+            m = _bench.measurements()
+            for k, v in timings.items():
+                m.add(k.replace("_", "."), v)
+            m.done()
+
             return result
 
     @classmethod
