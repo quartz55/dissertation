@@ -11,6 +11,7 @@ import pandas as pd
 import sklearn.metrics
 from aiostream import stream
 from plotnine import *
+from sklearn.model_selection import KFold
 
 from cimc import utils
 from cimc.classifier.utils import get_clsf
@@ -292,8 +293,37 @@ def cell2():
         (conf_plot + theme_seaborn()).save(f"query_{i}_seaborn.conf.jpg")
 
 
+def k_cross_val():
+    res = pd.DataFrame()
+    for i in QUERIES_DONE:
+        res = res.append(pd.read_csv(rel_path(f"query_{i}.results.csv")))
+    kf = KFold(n_splits=5, shuffle=True)
+
+    reports = []
+    for k, (train_idx, test_idx) in enumerate(kf.split(res)):
+        print(f"Fold {k + 1}| Train: {len(train_idx)} Test: {len(test_idx)}")
+        train: pd.DataFrame
+        test: pd.DataFrame
+        train, test = res.iloc[train_idx], res.iloc[test_idx]
+        roc = calculate_roc_curve(train)
+        best = get_best_thres(roc)
+        thres = best["threshold"]
+        pred = test.assign(predicted=test["similarity"] >= thres)
+        conf = confusion_matrix(pred, dataframe=True)
+        report = prediction_report(pred)
+        reports.append(report)
+        pass
+    arr = np.array([[r.precision, r.recall, r.F1] for r in reports])
+    print(arr)
+    arr_avg = np.mean(arr, axis=0)
+    pass
+
+
 def workbook():
     # utils.run_future_sync(grab_results([1, 2, 4, 7, 13, 14, 20]))
+    # utils.run_future_sync(grab_results([16]))
+    k_cross_val()
+    return
 
     parser = argparse.ArgumentParser(description='CC_WEB_VIDEO dataset script')
     parser.add_argument('task', type=str, choices=['classify', 'ndvd'],

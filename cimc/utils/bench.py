@@ -4,16 +4,13 @@ pool = redis.ConnectionPool()
 
 _conn = redis.StrictRedis(connection_pool=pool)
 _counter_key = "global:bench:counter"
-BENCH_ID = int(_conn.get(_counter_key))
+BENCH_ID = int(_conn.incr(_counter_key))
 
 
 def new_batch():
     global BENCH_ID
     BENCH_ID = int(_conn.incr(_counter_key))
     return BENCH_ID
-
-
-new_batch()  # new batch per python session
 
 
 class _Measurements:
