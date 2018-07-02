@@ -18,7 +18,7 @@ from cimc.models import YoloV3_2 as YoloV3
 from cimc.models.yolov3.labels import COCO_LABELS
 from cimc.scene import SceneDetector
 from cimc.scene.classification import SceneClassifier
-from cimc.tracker import MultiTracker
+from cimc.tracker import MultiTracker, ParallelMultiTracker
 from cimc.utils import bbox, log, bench
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,8 @@ def classify_video(video_uri: str, force_detections=False) -> VideoClassificatio
                 [bbox.ReverseScale(*size), bbox.FromYoloOutput(COCO_LABELS)]
             )
 
-        tracker = MultiTracker(max_age=int(fps), min_hits=int(fps / 2), iou_thres=0.35)
+        # tracker = MultiTracker(max_age=int(fps), min_hits=int(fps / 2), iou_thres=0.35)
+        tracker = ParallelMultiTracker(max_age=int(fps), min_hits=int(fps / 2), iou_thres=0.35)
 
         clsf = VideoClassification(video_uri, metadata=meta)
         t_start = time.time()
@@ -138,6 +139,8 @@ def classify_video(video_uri: str, force_detections=False) -> VideoClassificatio
             segment.end = length
             segment.scene = scene_classifier.classification()
             clsf.append_segment(segment)
+
+        tracker.cleanup()
 
         t_end = time.time()
 

@@ -1,8 +1,9 @@
+import multiprocessing as mp
+import time
 from typing import List, Tuple, Dict
 
 import attr
 import numpy as np
-import time
 from filterpy.kalman import KalmanFilter
 from sklearn.utils.linear_assignment_ import linear_assignment
 
@@ -145,7 +146,6 @@ class Tracker:
         self.min_hits = min_hits
         self.iou_thres = iou_thres
         self.trackers: List[KalmanBoxTracker] = []
-        self.curr_frame = 0
         self._bench = bench.Bench("object.tracker")
 
     def _match_trackers(self, bboxes: List[BoundingBox]):
@@ -185,7 +185,6 @@ class Tracker:
 
     def update(self, bboxes):
         t0 = time.time()
-        self.curr_frame += 1
 
         # Kalman Filter predict step
         for i, tracker in reversed(list(enumerate(self.trackers))):
@@ -242,13 +241,15 @@ class Tracker:
 
         return ret
 
+    def reset(self):
+        self.trackers = []
+
 
 class MultiTracker:
     def __init__(self, max_age=1, min_hits=3, iou_thres=0.3):
         self.max_age = max_age
         self.min_hits = min_hits
         self.iou_thres = iou_thres
-        self.curr_frame = 0
         self.trackers: Dict[int, Tracker] = {}
         self._bench = bench.Bench("multi.tracker")
 
@@ -268,17 +269,84 @@ class MultiTracker:
         for cls, bbs in per_class.items():
             if cls not in self.trackers:
                 tracker = Tracker(self.max_age, self.min_hits, self.iou_thres)
-                tracker.curr_frame = self.curr_frame
                 self.trackers[cls] = tracker
             tracked[cls] = self.trackers[cls].update(bbs)
-        self.curr_frame += 1
 
         (self._bench.measurements()
-            .add("pre.process", t1 - t0)
-            .add("trackers.update", time.time() - t1)).done()
+         .add("pre.process", t1 - t0)
+         .add("trackers.update", time.time() - t1)).done()
 
         return tracked
 
     def reset(self):
-        self.curr_frame = 0
+        self.trackers = {}
+
+    def cleanup(self):
+        pass
+
+
+def tracker_process(tracker: Tracker, tasks: mp.Queue, results: mp.Queue):
+    while True:
+        [msg, bboxes] = tasks.get()
+        if msg == "exit":
+            break
+        elif msg == "reset":
+            tracker.reset()
+        elif msg == "update":
+            tracked = tracker.update(bboxes)
+            results.put(tracked)
+
+
+class ParallelMultiTracker:
+    def __init__(self, max_age=1, min_hits=3, iou_thres=0.3):
+        self.max_age = max_age
+        self.min_hits = min_hits
+        self.iou_thres = iou_thres
+        self.trackers: Dict[int, Tuple[mp.Process, mp.Queue, mp.Queue]] = {}
+        self._bench = bench.Bench("par.multi.tracker")
+
+    def update(self, bboxes) -> Dict[int, List[TrackedBoundingBox]]:
+        t0 = time.time()
+
+        per_class = {cls: [] for cls in self.trackers.keys()}
+        for bbox in bboxes:
+            if bbox.class_id in per_class:
+                per_class[bbox.class_id].append(bbox)
+            else:
+                per_class[bbox.class_id] = [bbox]
+
+        t1 = time.time()
+
+        tracked = {}
+        for cls, bbs in per_class.items():
+            if cls not in self.trackers:
+                tracker = Tracker(self.max_age, self.min_hits, self.iou_thres)
+                tasks, results = mp.Queue(), mp.Queue()
+                proc = mp.Process(target=tracker_process, args=(tracker, tasks, results), name=f"Tracker-{cls}")
+                proc.start()
+                self.trackers[cls] = (proc, tasks, results)
+            self.trackers[cls][1].put(["update", bbs])
+
+        t2 = time.time()
+
+        for cls in per_class.keys():
+            tracked[cls] = self.trackers[cls][2].get()
+
+        t3 = time.time()
+
+        (self._bench.measurements()
+         .add("pre.process", t1 - t0)
+         .add("tracker.process.update", t2 - t1)
+         .add("tracker.process.results", t3 - t2)).done()
+
+        return tracked
+
+    def reset(self):
+        for _, t, _ in self.trackers.values():
+            t.put(["reset", None])
+
+    def cleanup(self):
+        for p, q, _ in self.trackers.values():
+            q.put(["exit", None])
+            p.join()
         self.trackers = {}

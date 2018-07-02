@@ -28,16 +28,39 @@ class _Measurements:
 
 
 class Bench(redis.StrictRedis):
-    def __init__(self, name: str, alias: str=None):
+    def __init__(self, name: str, alias: str = None):
         super().__init__(connection_pool=pool)
+        self._key = ""
+        self._name = ""
         self.name = name
-        self._key = f"{name}:{BENCH_ID}"
-        self.sadd(f"benches:type:{name}", self._key)
-        self.sadd(f"benches:id:{BENCH_ID}", self._key)
+        self._empty = True
+
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, value):
+        self._name = value
+        self._key = f"{self._name}:{BENCH_ID}"
+
+    @property
+    def key(self):
+        return self._key
+
+    def _setup(self):
+        if self._empty:
+            self._empty = False
+            self.sadd(f"benches:id:{BENCH_ID}", self.key)
 
     def measurement(self, group: str, value: float):
-        key_name = self._key + ":" + group
+        if self._empty:
+            self._setup()
+        key_name = self.key + ":" + group
         return self.rpush(key_name, value)
 
     def measurements(self):
-        return _Measurements(self._key, self)
+        if self._empty:
+            self._setup()
+        return _Measurements(self.key, self)
+
