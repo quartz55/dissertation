@@ -72,8 +72,8 @@ def classify_video(video_uri: str, force_detections=False) -> VideoClassificatio
                 [bbox.ReverseScale(*size), bbox.FromYoloOutput(COCO_LABELS)]
             )
 
-        tracker = MultiTracker(max_age=int(fps), min_hits=int(fps / 2), iou_thres=0.35)
-        # tracker = ParallelMultiTracker(max_age=int(fps), min_hits=int(fps / 2), iou_thres=0.35)
+        # tracker = MultiTracker(max_age=int(fps), min_hits=int(fps / 2), iou_thres=0.35)
+        tracker = ParallelMultiTracker(max_age=int(fps), min_hits=int(fps / 2), iou_thres=0.35)
 
         clsf = VideoClassification(video_uri, metadata=meta)
         t_start = time.time()

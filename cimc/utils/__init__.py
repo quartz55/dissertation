@@ -15,6 +15,20 @@ ImageType = Union[str, np.ndarray, Image.Image]
 best_device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
+class ToPILImage:
+    def __call__(self, img: np.ndarray):
+        return Image.fromarray(img, 'RGB')
+
+
+class SIMDResize:
+    def __init__(self, size, interpolation=Image.BILINEAR):
+        self.size = size
+        self.interpolation = interpolation
+
+    def __call__(self, img: Image.Image):
+        return img.resize(self.size, self.interpolation)
+
+
 def to_image(image: ImageType):
     if isinstance(image, Image.Image):
         img = image.convert('RGB')

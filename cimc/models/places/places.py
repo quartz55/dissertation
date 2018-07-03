@@ -80,13 +80,11 @@ class Places365(WideResNet):
         # super().__init__(Bottleneck, [3, 4, 23, 3], num_classes=365)
         # 152 layers
         # super().__init__(Bottleneck, [3, 8, 36, 3], num_classes=365)
-        self.pre_process = tf.Compose(
-            [
-                tf.Resize((224, 224)),
-                tf.ToTensor(),
-                tf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-            ]
-        )
+        self.pre_process = tf.Compose([
+            tf.ToTensor(),
+            tf.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225]),
+        ])
         self._prepared = False
         self._features = {}
         self._hooks = {}
@@ -106,7 +104,14 @@ class Places365(WideResNet):
     def classify(self, image: utils.ImageType) -> PlacesClassification:
         t0 = time.time()
 
-        img = utils.to_image(image)
+        img = utils.ToPILImage()(image)
+
+        t0_1 = time.time()
+
+        img = utils.SIMDResize((224, 244))(img)
+
+        t0_2 = time.time()
+
         img_input = self.pre_process(img).unsqueeze(0)
 
         t1 = time.time()
@@ -148,7 +153,9 @@ class Places365(WideResNet):
 
             t5 = time.time()
             timings = {
-                "pre.process": t1 - t0,
+                "to.image": t0_1 - t0,
+                "resize": t0_2 - t0_1,
+                "pre.process": t1 - t0_2,
                 "gpu.transfer": t2 - t1,
                 "forward.pass": t3 - t2,
                 "result.prep": t4 - t3,

@@ -20,7 +20,7 @@ dependencies:
     - aiostream
     - coloredlogs
     - tqdm
-    - pillow
+    - pillow-simd
     - imageio
     - opencv-contrib-python
     - scipy

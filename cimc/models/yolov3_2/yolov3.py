@@ -19,15 +19,22 @@ _bench = bench.Bench("yolov3")
 class YoloV3(Darknet):
     def __init__(self):
         super().__init__(YOLOV3_CFG)
-        self.pre_process = tf.Compose(
-            [tf.Resize((self.img_size, self.img_size)), tf.ToTensor()]
-        )
+        self.pre_process = tf.Compose([
+            tf.ToTensor()
+        ])
 
     def detect(self, image: utils.ImageType, confidence=0.25, nms_thres=0.4):
         m = _bench.measurements()
         t0 = time.time()
 
-        img = utils.to_image(image)
+        img = utils.ToPILImage()(image)
+
+        t0_1 = time.time()
+
+        img = utils.SIMDResize((self.img_size, self.img_size))(img)
+
+        t0_2 = time.time()
+
         img_input = self.pre_process(img).unsqueeze(0)
 
         t1 = time.time()
@@ -47,13 +54,17 @@ class YoloV3(Darknet):
             t4 = time.time()
 
             timings = {
-                "pre_process": t1 - t0,
+                "to_image": t0_1 - t0,
+                "resize": t0_2 - t0_1,
+                "pre_process": t1 - t0_2,
                 "gpu_transfer": t2 - t1,
                 "predict": t3 - t2,
                 "nms": t4 - t3,
                 "total": t4 - t0,
             }
             (m
+             .add("to.image", timings["to_image"])
+             .add("resize", timings["resize"])
              .add("pre.process", timings["pre_process"])
              .add("gpu.transfer", timings["gpu_transfer"])
              .add("region.proposal", timings["predict"])
