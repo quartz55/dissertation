@@ -87,39 +87,36 @@ class Places365(WideResNet):
                 tf.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ]
         )
+        self._prepared = False
+        self._features = {}
+        self._hooks = {}
+
+    def prepare(self):
+        self.eval()
+
+        def hook(name, _m, _i, o):
+            self._features[name] = np.squeeze(o.detach().cpu().numpy())
+
+        self._features = {}
+        self._hooks = {
+            "layer4": self.layer4.register_forward_hook(f.partial(hook, "layer4")),
+            "avgpool": self.avgpool.register_forward_hook(f.partial(hook, "avgpool"))
+        }
 
     def classify(self, image: utils.ImageType) -> PlacesClassification:
         t0 = time.time()
 
         img = utils.to_image(image)
-
-        if self.training:
-            self.eval()
-
-        features = {}
-        hooks = {}
-
-        def hook(name, _m, _i, o):
-            features[name] = np.squeeze(o.detach().cpu().numpy())
-
-        hooks["layer4"] = self.layer4.register_forward_hook(f.partial(hook, "layer4"))
-        hooks["avgpool"] = self.avgpool.register_forward_hook(
-            f.partial(hook, "avgpool")
-        )
-
-        # get the softmax weight
-        params = list(self.parameters())
-        weight_softmax = params[-2].data.cpu().numpy()
-        weight_softmax[weight_softmax < 0] = 0
-        curr_device = params[0].device if len(params) > 0 else utils.best_device
+        img_input = self.pre_process(img).unsqueeze(0)
 
         t1 = time.time()
 
-        img_input = self.pre_process(img).unsqueeze(0).to(curr_device)
+        curr_device = next(map(lambda p: p.device, self.parameters()), utils.best_device)
+        img_input = img_input.to(curr_device)
+
+        t2 = time.time()
 
         with torch.no_grad():
-            t2 = time.time()
-
             logit = self(img_input)
 
             t3 = time.time()
@@ -129,10 +126,9 @@ class Places365(WideResNet):
             probs_cats, cats_idx = probs_cats.cpu().numpy(), cats_idx.cpu().numpy()
             top_5_cats = lbl.CATEGORIES[cats_idx[:5]]
 
-            io_image = np.mean(
-                lbl.CATEGORIES[cats_idx[:10]]["type"]
-            )  # vote for the indoor or outdoor
-            responses_attribute = lbl.ATTRIBUTES["weights"].dot(features["avgpool"])
+            io_image = np.mean(lbl.CATEGORIES[cats_idx[:10]]["type"])
+
+            responses_attribute = lbl.ATTRIBUTES["weights"].dot(self._features["avgpool"])
             attrs_idx = np.argsort(responses_attribute)
             top_10_attrs = lbl.ATTRIBUTES[attrs_idx[-1:-10:-1]]
 
@@ -152,11 +148,11 @@ class Places365(WideResNet):
 
             t5 = time.time()
             timings = {
-                "setup": t1 - t0,
-                "pre_process": t2 - t1,
-                "forward_pass": t3 - t2,
-                "result_prep": t4 - t3,
-                "result_creation": t5 - t4,
+                "pre.process": t1 - t0,
+                "gpu.transfer": t2 - t1,
+                "forward.pass": t3 - t2,
+                "result.prep": t4 - t3,
+                "result.creation": t5 - t4,
                 "total": t5 - t0,
             }
             result = PlacesClassification(
@@ -165,12 +161,10 @@ class Places365(WideResNet):
                 attributes=attributes,
                 timings=timings,
             )
-            for h in hooks.values():
-                h.remove()
 
             m = _bench.measurements()
             for k, v in timings.items():
-                m.add(k.replace("_", "."), v)
+                m.add(k, v)
             m.done()
 
             return result

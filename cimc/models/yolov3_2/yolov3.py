@@ -2,7 +2,6 @@ import os
 import time
 
 import torch
-from PIL import Image
 from torchvision.transforms import transforms as tf
 
 import cimc.utils as utils
@@ -27,41 +26,36 @@ class YoloV3(Darknet):
     def detect(self, image: utils.ImageType, confidence=0.25, nms_thres=0.4):
         m = _bench.measurements()
         t0 = time.time()
-        if not isinstance(image, Image.Image):
-            pp = lambda i: self.pre_process(tf.ToPILImage()(i))
-        else:
-            pp = self.pre_process
 
-        if self.training:
-            self.eval()
+        img = utils.to_image(image)
+        img_input = self.pre_process(img).unsqueeze(0)
 
-        device = next(self.parameters()).device
-        img_input = pp(image).unsqueeze(0).to(device)
         t1 = time.time()
 
+        device = next(self.parameters()).device
+        img_input = img_input.to(device)
+
+        t2 = time.time()
+
         with torch.no_grad():
-            # boxes_list = self(img_input)
-            # boxes = boxes_list[0][0] + boxes_list[1][0] + boxes_list[2][0]
-            # t2 = time.time()
-
-            # boxes = nms(boxes, nms_thres)
-            # t3 = time.time()
-
             detections = self(img_input)
-            t2 = time.time()
-            # print(detections[0])
-            detections = non_max_suppression(detections, 80, confidence, nms_thres)
-            # print(detections[0])
+
             t3 = time.time()
+
+            detections = non_max_suppression(detections, 80, confidence, nms_thres)
+
+            t4 = time.time()
 
             timings = {
                 "pre_process": t1 - t0,
-                "predict": t2 - t1,
-                "nms": t3 - t2,
-                "total": t3 - t0,
+                "gpu_transfer": t2 - t1,
+                "predict": t3 - t2,
+                "nms": t4 - t3,
+                "total": t4 - t0,
             }
             (m
              .add("pre.process", timings["pre_process"])
+             .add("gpu.transfer", timings["gpu_transfer"])
              .add("region.proposal", timings["predict"])
              .add("nms", timings["nms"])
              .add("iteration", timings["total"])).done()

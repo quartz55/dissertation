@@ -67,12 +67,13 @@ def classify_video(video_uri: str, force_detections=False) -> VideoClassificatio
         yolov3_net: Optional[YoloV3] = None
         if gen_detections:
             yolov3_net = YoloV3.pre_trained().to(utils.best_device)
+            yolov3_net.eval()
             pp = tf.Compose(
                 [bbox.ReverseScale(*size), bbox.FromYoloOutput(COCO_LABELS)]
             )
 
-        # tracker = MultiTracker(max_age=int(fps), min_hits=int(fps / 2), iou_thres=0.35)
-        tracker = ParallelMultiTracker(max_age=int(fps), min_hits=int(fps / 2), iou_thres=0.35)
+        tracker = MultiTracker(max_age=int(fps), min_hits=int(fps / 2), iou_thres=0.35)
+        # tracker = ParallelMultiTracker(max_age=int(fps), min_hits=int(fps / 2), iou_thres=0.35)
 
         clsf = VideoClassification(video_uri, metadata=meta)
         t_start = time.time()
@@ -87,6 +88,7 @@ def classify_video(video_uri: str, force_detections=False) -> VideoClassificatio
             while i < length:
                 measures = _bench.measurements()
                 t_iter_start = time.time()
+
                 try:
                     frame = video.get_next_data()
                 except imageio.core.CannotReadFrameError:
@@ -176,7 +178,7 @@ if __name__ == "__main__":
     classify_video(resources.video("TUD-Campus.mp4"), force_detections=True)
     classify_video(resources.video("TUD-Crossing.mp4"), force_detections=True)
     classify_video(resources.video("goldeneye.mp4"), force_detections=True)
-    classify_video(resources.video("goldeneye-2x.mp4"), force_detections=True)
+    # classify_video(resources.video("goldeneye-2x.mp4"), force_detections=True)
     # get_clsf(video_uri=resources.video('goldeneye-justiceleague.mp4'))
     # classify_and_annotate(resources.video("Venice-1.bk.mp4"))
     # classify_and_annotate(resources.video('goldeneye-justiceleague.mp4'))

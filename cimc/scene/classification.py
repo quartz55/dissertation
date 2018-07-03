@@ -38,6 +38,7 @@ class SceneClassifier:
     def __init__(self, step: int = 1, places_net: Places365 = None):
         if places_net is None:
             places_net = Places365.pre_trained().to(utils.best_device)
+        places_net.prepare()
         self.places_net = places_net
         self._step = step
         self._next_frame = 0
