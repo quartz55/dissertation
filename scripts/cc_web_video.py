@@ -214,6 +214,30 @@ def prediction_report(predictions):
                   TP, TN, FP, FN)
 
 
+def calculate_pr_curve(results):
+    prec, recall, thres = sklearn.metrics.precision_recall_curve(results["actual"], results["similarity"])
+    roc = pd.DataFrame({"threshold": thres,
+                        "precision": prec[:-1],
+                        "recall": recall[:-1]})
+    return roc
+
+
+def pr_curve_plot(measures, points=True):
+    plot = (ggplot(measures, aes(x="recall", y="precision")) +
+            geom_line(size=2, alpha=0.7, color="blue") +
+            labs(title="Precision-Recall Curve",
+                 x="Recall",
+                 y="Precision"))
+    if points:
+        plot += geom_point(alpha=0.35, stroke=0)
+    return plot
+
+
+def get_best_thres_pr(pr):
+    aux = pr.assign(max=pr["precision"] + pr["recall"])
+    return aux.loc[aux["max"].idxmax()]
+
+
 def calculate_roc_curve(results):
     fpr, tpr, thres = sklearn.metrics.roc_curve(results["actual"], results["similarity"])
     roc = pd.DataFrame({"threshold": thres,
@@ -233,7 +257,7 @@ def roc_curve_plot(measures, points=True):
     return plot
 
 
-def get_best_thres(roc):
+def get_best_thres_roc(roc):
     aux = roc.assign(max=roc["tpr"] - roc["fpr"])
     return aux.loc[aux["max"].idxmax()]
 
@@ -252,31 +276,35 @@ QUERIES_DONE = [1, 2, 7, 13, 14, 16, 20]
 
 
 def cell1():
+    """Results for all"""
     res = pd.DataFrame()
     for i in QUERIES_DONE:
         res = res.append(pd.read_csv(f"query_{i}.results.csv"))
     roc = calculate_roc_curve(res)
-    best_thres = get_best_thres(roc)
+    best_thres = get_best_thres_roc(roc)
     thres = best_thres["threshold"]
     preds = res.assign(predicted=res["similarity"] >= thres)
     conf_df = confusion_matrix(preds, dataframe=True)
 
+    pr = calculate_pr_curve(res)
+
     roc_plot = (roc_curve_plot(roc, points=False) +
                 ggtitle(f"ROC Curve"))
     (roc_plot + theme_538()).save(f"all_538.roc.jpg")
-    (roc_plot + theme_seaborn()).save(f"all_seaborn.roc.jpg")
 
     conf_plot = (conf_matrix_plot(conf_df) +
                  ggtitle(f"Confusion Matrix (thres={thres:.2f})"))
     (conf_plot + theme_538()).save(f"all_538.conf.jpg")
-    (conf_plot + theme_seaborn()).save(f"all_seaborn.conf.jpg")
+
+    pr_plot = pr_curve_plot(pr, points=False)
+    (pr_plot + theme_538()).save(f"all_538.pr.jpg")
 
 
 def cell2():
     for i in QUERIES_DONE:
         res = pd.read_csv(f"query_{i}.results.csv")
         roc = calculate_roc_curve(res)
-        best_thres = get_best_thres(roc)
+        best_thres = get_best_thres_roc(roc)
         thres = best_thres["threshold"]
         print(best_thres, thres)
         preds = res.assign(predicted=res["similarity"] >= thres)
@@ -306,7 +334,7 @@ def k_cross_val():
         test: pd.DataFrame
         train, test = res.iloc[train_idx], res.iloc[test_idx]
         roc = calculate_roc_curve(train)
-        best = get_best_thres(roc)
+        best = get_best_thres_roc(roc)
         thres = best["threshold"]
         pred = test.assign(predicted=test["similarity"] >= thres)
         conf = confusion_matrix(pred, dataframe=True)
@@ -322,7 +350,7 @@ def k_cross_val():
 def workbook():
     # utils.run_future_sync(grab_results([1, 2, 4, 7, 13, 14, 20]))
     # utils.run_future_sync(grab_results([16]))
-    k_cross_val()
+    cell1()
     return
 
     parser = argparse.ArgumentParser(description='CC_WEB_VIDEO dataset script')
