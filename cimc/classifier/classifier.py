@@ -184,10 +184,10 @@ if __name__ == "__main__":
     #     pass
     # classify_and_annotate_track(74, resources.video("Venice-1.bk.mp4"))
     # classify_video(resources.video("Venice-1.mp4"), force_detections=True)
-    # classify_video(resources.video("TUD-Campus.mp4"), force_detections=True)
+    classify_video(resources.video("TUD-Campus.mp4"), force_detections=True)
     # classify_video(resources.video("TUD-Crossing.mp4"), force_detections=True)
     # classify_video(resources.video("goldeneye.mp4"), force_detections=True)
-    classify_and_annotate(resources.video("ADL-Rundle-8.mp4"))
+    # classify_and_annotate(resources.video("ADL-Rundle-8.mp4"))
     # classify_and_annotate(resources.video("beach-1.mp4"))
     # classify_and_annotate(resources.video("beach-2.mp4"))
     # classify_and_annotate(resources.video("TUD-Campus.var.vflip-saturated-vignette.mp4"))
