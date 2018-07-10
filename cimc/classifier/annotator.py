@@ -175,3 +175,37 @@ def scene_class_overlay(frame: np.ndarray, segment: Segment) -> Image:
     draw.rectangle([0, 0, txt_w, txt_h], fill=(0, 0, 0, 100))
     draw.text((10, 10), text, font=overlay_font, fill=(255, 255, 255, 255))
     return overlay
+
+
+def tracking_annotation(video_uri: str, clsf: VideoClassification, id_to_track: int):
+    with imageio.get_reader(video_uri) as video:  # type: Format.Reader
+
+        fps = video.get_meta_data()["fps"]
+        length = len(video)
+        out_uri, ext = os.path.splitext(video_uri)
+        out_uri = f"{out_uri}.track.mp4"
+
+        with imageio.get_writer(out_uri, fps=fps, quality=6, macro_block_size=2) as out:  # type: Format.Writer
+            with tqdm(total=length, desc=f"Drawing tracking for '{video_uri}'", unit="frame") as bar:
+
+                class_colors = make_class_labels(COCO_LABELS)
+                seg_iter = iter(clsf)
+                curr_segment: Segment = next(seg_iter)
+
+                for i, frame in enumerate(video):
+                    if i >= curr_segment.end:
+                        curr_segment = next(seg_iter)
+
+                    # Tracked objects
+                    rel_frame_idx = i - curr_segment.start
+                    objects = curr_segment.objects[rel_frame_idx]
+                    objects: List[TrackedBoundingBox] = f.reduce(op.concat, objects.values(), [])
+                    objects = [o for o in objects if o.tracking_id == id_to_track]
+
+                    # Scene recognition overlay
+                    out_img = Image.fromarray(frame)
+                    out_img = draw_detections(out_img, objects, class_colors)
+                    out_img = np.array(out_img)
+
+                    out.append_data(out_img)
+                    bar.update()

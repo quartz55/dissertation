@@ -1,6 +1,7 @@
 import logging
 import os
 import pickle
+import time
 from typing import Set, Dict, List, Tuple, Optional, Union
 
 import attr
@@ -13,11 +14,14 @@ import cimc.models.yolov3.labels as yolo_labels
 from cimc import resources
 from cimc.classifier import Segment, VideoClassification
 from cimc.models.places import SceneType
-from cimc.utils import log
+from cimc.utils import log, bench
 
 logger = logging.getLogger(__name__)
 logger.addHandler(log.TqdmLoggingHandler())
 logger.setLevel(logging.DEBUG)
+
+_bench_gen = bench.Bench("signature.generation")
+_bench_comp = bench.Bench("signature.comparison")
 
 TYPE = (0, 1)
 DURATION = (sum(TYPE), 1)
@@ -50,6 +54,10 @@ def clean_vector(v: pd.DataFrame):
 
 
 def make_feature_vector(segment: Segment):
+    m = _bench_gen.measurements()
+
+    t0 = time.time()
+
     fv = np.zeros(COLUMNS, dtype=np.double)
 
     # Type
@@ -60,15 +68,21 @@ def make_feature_vector(segment: Segment):
     # fv[DURATION[0]] = segment.duration
     fv[DURATION[0]] = 0
 
+    t1 = time.time()
+
     # Categories
     cats = segment.scene.categories
     confs = cats["conf"]
     fv[cats["id"] + CATEGORIES[0]] = confs / np.sqrt(confs.dot(confs))
 
+    t2 = time.time()
+
     # Attributes
     attrs = segment.scene.attributes
     freqs = attrs["freq"]
     fv[attrs["id"] + ATTRIBUTES[0]] = freqs / np.sqrt(freqs.dot(freqs))
+
+    t3 = time.time()
 
     # Objects
     objs_by_class = _obj_id_by_class(segment)
@@ -79,8 +93,17 @@ def make_feature_vector(segment: Segment):
     if counts.sum() != 0:
         fv[objs["id"] + OBJECTS[0]] = counts / np.sqrt(counts.dot(counts))
 
+    t4 = time.time()
+
     # Unit vector
     fv /= np.sqrt(fv.dot(fv))
+
+    t5 = time.time()
+
+    (m.add("fs.categories", t2 - t1)
+     .add("fs.attributes", t3 - t2)
+     .add("fs.objects", t4 - t3)
+     .add("total", t5 - t0)).done()
 
     return pd.DataFrame(fv[np.newaxis], columns=HEADERS, index=[segment.id])
 
@@ -93,14 +116,26 @@ def _aux(classes):
 def segment_similarity(segments: List[Segment], other: List[Segment] = None):
     if other is not None and isinstance(other, list) and len(other) > 0:
         fvs = pd.concat([make_feature_vector(s) for s in segments + other])
+        t0 = time.time()
+
         fvs_clean = clean_vector(fvs)
         fvs_1, fvs_2 = fvs_clean.iloc[: len(segments)], fvs_clean.iloc[len(segments):]
-        return metrics.cosine_similarity(fvs_1, fvs_2)
+
+        t1 = time.time()
+
+        res = metrics.cosine_similarity(fvs_1, fvs_2)
+
+        t2 = time.time()
+
+        _bench_comp.measurement("clean", t1 - t0)
+        _bench_comp.measurement("cos.sim", t2 - t1)
+        return res
         # return metrics.euclidean_distances(fvs_1, fvs_2)
     else:
         fvs = pd.concat([make_feature_vector(s) for s in segments])
         fvs_clean = clean_vector(fvs)
-        return metrics.cosine_similarity(fvs_clean)
+        res = metrics.cosine_similarity(fvs_clean)
+        return res
         # return metrics.euclidean_distances(fvs_clean)
 
 
@@ -181,6 +216,7 @@ def video_similarity(clsf1_uri: ClsfArg,
                      threshold: float = 0.7):
     clsf1: VideoClassification
     clsf2: VideoClassification
+    m = _bench_comp.measurements()
 
     if isinstance(clsf1_uri, str):
         with open(clsf1_uri, "rb") as fd1:
@@ -199,7 +235,13 @@ def video_similarity(clsf1_uri: ClsfArg,
         raise ValueError("clsf2 must be a path or a VideoClassification")
 
     sim_matrix = segment_similarity(clsf1.segments, clsf2.segments)
+
+    t0 = time.time()
+
     matches = match_segments(sim_matrix, threshold)
+
+    t1 = time.time()
+
     res = [None] * len(sim_matrix)
     for i in range(len(res)):
         matching = matches[:, 1][matches[:, 0] == i]
@@ -207,6 +249,13 @@ def video_similarity(clsf1_uri: ClsfArg,
         sorted_sim_idx = np.argsort(similarity)[::-1]
         seg_res = list(zip(matching[sorted_sim_idx], similarity[sorted_sim_idx]))
         res[i] = seg_res
+
+    t_last = time.time()
+
+    (m
+     .add("threshold.filter", t1 - t0)
+     .add("segment.matching", t_last - t1)).done()
+
     return SimilarityResult(
         video_1=(clsf1.name, clsf1.filename),
         video_2=(clsf2.name, clsf2.filename),
@@ -265,9 +314,22 @@ Annotation: {name}
 
 
 def main():
+    beach1 = resources.video("beach-1.mp4.clsf")
+    beach2 = resources.video("beach-2.mp4.clsf")
+    beach_sim = video_similarity(beach1, beach2)
+
     vid1 = resources.video("TUD-Campus.mp4.clsf")
     vid1_alt1 = resources.video("TUD-Campus.var.rotate-scale.mp4.clsf")
     vid1_alt2 = resources.video("TUD-Campus.var.rotate-scale-flip-color.mp4.clsf")
+    vid1_alt3 = resources.video("TUD-Campus.var.vflip-saturated-vignette.mp4.clsf")
+    vid1_alt4 = resources.video("TUD-Campus.var.blurred.mp4.clsf")
+    vid1_alt5 = resources.video("TUD-Campus.var.textoverlay.mp4.clsf")
+
+    s1 = video_similarity(vid1, vid1_alt1)
+    s2 = video_similarity(vid1, vid1_alt2)
+    s3 = video_similarity(vid1, vid1_alt3)
+    s4 = video_similarity(vid1, vid1_alt4)
+    s5 = video_similarity(vid1, vid1_alt5)
 
     vid2 = resources.video("goldeneye.mp4.clsf")
     vid2_2x = resources.video("goldeneye-2x.mp4.clsf")
@@ -278,8 +340,8 @@ def main():
 
     vid5 = resources.video("goldeneye-justiceleague.mp4.clsf")
 
-    s1 = video_similarity(vid1, vid1_alt1)
-    s2 = video_similarity(vid1, vid1_alt2)
+    # s1 = video_similarity(vid1, vid1_alt1)
+    # s2 = video_similarity(vid1, vid1_alt2)
     s3 = video_similarity(vid1, vid3)
     s4 = video_similarity(vid1, vid2)
     s5 = video_similarity(vid2, vid2_2x)
@@ -291,4 +353,5 @@ def main():
 
 
 if __name__ == "__main__":
+    main()
     test_dataset()

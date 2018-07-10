@@ -11,14 +11,14 @@ from torchvision.transforms import transforms as tf
 from tqdm import tqdm
 
 from cimc import resources, utils
-from cimc.classifier.annotator import annotate_video
+from cimc.classifier.annotator import annotate_video, tracking_annotation
 from cimc.classifier.classification import VideoClassification, Segment
 from cimc.classifier.utils import get_clsf
 from cimc.models import YoloV3_2 as YoloV3
 from cimc.models.yolov3.labels import COCO_LABELS
 from cimc.scene import SceneDetector
 from cimc.scene.classification import SceneClassifier
-from cimc.tracker import MultiTracker, ParallelMultiTracker
+from cimc.tracker import ParallelMultiTracker
 from cimc.utils import bbox, log, bench
 
 logger = logging.getLogger(__name__)
@@ -167,6 +167,14 @@ def classify_and_annotate(video_uri=None, clsf_uri=None):
     annotate_video(video_uri, clsf)
 
 
+def classify_and_annotate_track(id_to_track: int, video_uri=None, clsf_uri=None, ):
+    if video_uri is None:
+        video_uri = resources.video("goldeneye.mp4")
+
+    clsf = get_clsf(clsf_uri, video_uri)
+    tracking_annotation(video_uri, clsf, id_to_track)
+
+
 if __name__ == "__main__":
     # try:
     #     with open(resources.video('justice-league.mp4.clsf'), 'rb') as fd:
@@ -174,10 +182,17 @@ if __name__ == "__main__":
     #         pass
     # except:
     #     pass
-    classify_video(resources.video("Venice-1.mp4"), force_detections=True)
-    classify_video(resources.video("TUD-Campus.mp4"), force_detections=True)
-    classify_video(resources.video("TUD-Crossing.mp4"), force_detections=True)
-    classify_video(resources.video("goldeneye.mp4"), force_detections=True)
+    # classify_and_annotate_track(74, resources.video("Venice-1.bk.mp4"))
+    # classify_video(resources.video("Venice-1.mp4"), force_detections=True)
+    # classify_video(resources.video("TUD-Campus.mp4"), force_detections=True)
+    # classify_video(resources.video("TUD-Crossing.mp4"), force_detections=True)
+    # classify_video(resources.video("goldeneye.mp4"), force_detections=True)
+    classify_and_annotate(resources.video("ADL-Rundle-8.mp4"))
+    # classify_and_annotate(resources.video("beach-1.mp4"))
+    # classify_and_annotate(resources.video("beach-2.mp4"))
+    # classify_and_annotate(resources.video("TUD-Campus.var.vflip-saturated-vignette.mp4"))
+    # classify_and_annotate(resources.video("TUD-Campus.var.blurred.mp4"))
+    # classify_and_annotate(resources.video("TUD-Campus.var.textoverlay.mp4"))
     # classify_video(resources.video("goldeneye-2x.mp4"), force_detections=True)
     # get_clsf(video_uri=resources.video('goldeneye-justiceleague.mp4'))
     # classify_and_annotate(resources.video("Venice-1.bk.mp4"))
