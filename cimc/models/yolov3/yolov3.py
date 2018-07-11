@@ -6,8 +6,8 @@ from torchvision.transforms import transforms as tf
 
 import cimc.utils as utils
 from cimc import resources
-from cimc.models.yolov3_2.models import Darknet
-from cimc.models.yolov3_2.utils.utils import non_max_suppression
+from cimc.models.yolov3.models import Darknet
+from cimc.models.yolov3.utils.utils import non_max_suppression
 from cimc.utils import bench
 
 YOLOV3_WEIGHTS_URL = "https://pjreddie.com/media/files/yolov3.weights"

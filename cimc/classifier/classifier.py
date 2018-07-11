@@ -14,7 +14,7 @@ from cimc import resources, utils
 from cimc.classifier.annotator import annotate_video, tracking_annotation
 from cimc.classifier.classification import VideoClassification, Segment
 from cimc.classifier.utils import get_clsf
-from cimc.models import YoloV3_2 as YoloV3
+from cimc.models import YoloV3 as YoloV3
 from cimc.models.yolov3.labels import COCO_LABELS
 from cimc.scene import SceneDetector
 from cimc.scene.classification import SceneClassifier
@@ -184,31 +184,11 @@ if __name__ == "__main__":
     #     pass
     # classify_and_annotate_track(74, resources.video("Venice-1.bk.mp4"))
     # classify_video(resources.video("Venice-1.mp4"), force_detections=True)
-    classify_video(resources.video("TUD-Campus.mp4"), force_detections=True)
+    # classify_video(resources.video("TUD-Campus.mp4"), force_detections=True)
+    classify_and_annotate(resources.video("TUD-Campus.mp4"))
+    classify_and_annotate(resources.video("Venice-1.mp4"))
     # classify_video(resources.video("TUD-Crossing.mp4"), force_detections=True)
     # classify_video(resources.video("goldeneye.mp4"), force_detections=True)
     # classify_and_annotate(resources.video("ADL-Rundle-8.mp4"))
     # classify_and_annotate(resources.video("beach-1.mp4"))
     # classify_and_annotate(resources.video("beach-2.mp4"))
-    # classify_and_annotate(resources.video("TUD-Campus.var.vflip-saturated-vignette.mp4"))
-    # classify_and_annotate(resources.video("TUD-Campus.var.blurred.mp4"))
-    # classify_and_annotate(resources.video("TUD-Campus.var.textoverlay.mp4"))
-    # classify_video(resources.video("goldeneye-2x.mp4"), force_detections=True)
-    # get_clsf(video_uri=resources.video('goldeneye-justiceleague.mp4'))
-    # classify_and_annotate(resources.video("Venice-1.bk.mp4"))
-    # classify_and_annotate(resources.video('goldeneye-justiceleague.mp4'))
-    # classify_and_annotate(resources.video('goldeneye.mp4'))
-    # classify_and_annotate(resoUrces.video('goldeneye-2x.mp4'))
-    # classify_and_annotate(resources.video('TUD-Campus.mp4'))
-    # get_clsf(video_uri=resources.video("TUD-Campus.mp4"))
-    # classify_and_annotate(resources.video('TUD-Campus.var.rotate-scale.mp4'))
-    # classify_and_annotate(resources.video('TUD-Crossing.mp4'))
-    # classify_and_annotate(resources.video('ADL-Rundle-8.mp4'))
-    # classify_and_annotate(resources.video('Venice-1.mp4'))
-    # classify_and_annotate(resources.video('justice-league.mp4'))
-    # classify_and_annotate(resources.video('deadpool2.mp4'))
-    # classify_and_annotate(resources.video('ant-man-and-wasp.mp4'))
-    # classify_and_annotate(resources.video('bvs.mp4'))
-    # classify_and_annotate(resources.video('goldeneye.mp4'))
-    # classify_and_annotate(resources.video(
-    #     'TUD-Campus.var.rotate-scale-flip-color.mp4'))
