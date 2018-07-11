@@ -35,16 +35,16 @@ def downscale(frame: np.ndarray, factor: int) -> np.ndarray:
 
 
 def frame_grabber(skip=0):
-    curr = 0
-    next = 0
+    curr_id = 0
+    next_id = 0
     while True:
         ret = None
-        if next == 0:
-            ret = curr
-            next = skip
+        if next_id == 0:
+            ret = curr_id
+            next_id = skip
         else:
-            next -= 1
-        curr += 1
+            next_id -= 1
+        curr_id += 1
         yield ret
 
 
@@ -113,48 +113,6 @@ class SceneDetector:
         measurements.done()
 
         return cut
-
-        # cut = False
-        # if self._curr_id == self._skip_to:
-        #     self._skip_to = self._curr_id + self.skip
-        #
-        #     if self._curr_id == 0:
-        #         cut = True
-        #         self._last_scene = 0
-        #
-        #     elif (self._last_frame is not None
-        #           and self._curr_id - self._last_scene >= self.min_length):
-        #
-        #         t1 = time.time()
-        #
-        #         if self._last_processed is None:
-        #             down = downscale(self._last_frame, self.downscale_factor)
-        #             self._last_processed = rgb_2_hsv(down)
-        #
-        #         f1 = self._last_processed
-        #         f2 = rgb_2_hsv(downscale(frame, self.downscale_factor))
-        #
-        #         t2 = time.time()
-        #
-        #         cut = is_cut(f1, f2, self.threshold)
-        #         if cut:
-        #             self._last_scene = self._curr_id
-        #
-        #         t3 = time.time()
-        #         self._last_processed = f2
-        #         (measurements
-        #          .add("pre.process", t2 - t1)
-        #          .add("hsv.comp", t3 - t2)
-        #          .add("cut.detect", t3 - t1))
-        #
-        #     self._last_frame = frame
-        #
-        # self._curr_id += 1
-        #
-        # measurements.add("iteration", time.time() - t0)
-        # measurements.done()
-        #
-        # return cut
 
 
 def detect(video_uri: str):

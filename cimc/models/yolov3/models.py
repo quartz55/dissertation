@@ -1,13 +1,15 @@
 from __future__ import division
 
+from collections import defaultdict
+
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-import numpy as np
 
-from .utils.parse_config import *
-from .utils.utils import build_targets
-from collections import defaultdict
+from cimc.models.yolov3.utils.parse_config import *
+from cimc.models.yolov3.utils.utils import build_targets
+
 
 def create_modules(module_defs):
     """
@@ -36,8 +38,8 @@ def create_modules(module_defs):
                 modules.add_module('leaky_%d' % i, nn.LeakyReLU(0.1))
 
         elif module_def['type'] == 'upsample':
-            upsample = nn.Upsample( scale_factor=int(module_def['stride']),
-                                    mode='nearest')
+            upsample = nn.Upsample(scale_factor=int(module_def['stride']),
+                                   mode='nearest')
             modules.add_module('upsample_%d' % i, upsample)
 
         elif module_def['type'] == 'route':
@@ -53,7 +55,7 @@ def create_modules(module_defs):
             anchor_idxs = [int(x) for x in module_def["mask"].split(",")]
             # Extract anchors
             anchors = [int(x) for x in module_def["anchors"].split(",")]
-            anchors = [(anchors[i], anchors[i+1]) for i in range(0, len(anchors),2)]
+            anchors = [(anchors[i], anchors[i + 1]) for i in range(0, len(anchors), 2)]
             anchors = [anchors[i] for i in anchor_idxs]
             num_classes = int(module_def['classes'])
             img_height = int(hyperparams['height'])
@@ -66,13 +68,17 @@ def create_modules(module_defs):
 
     return hyperparams, module_list
 
+
 class EmptyLayer(nn.Module):
     """Placeholder for 'route' and 'shortcut' layers"""
+
     def __init__(self):
         super(EmptyLayer, self).__init__()
 
+
 class YOLOLayer(nn.Module):
     """Detection layer"""
+
     def __init__(self, anchors, num_classes, img_dim):
         super(YOLOLayer, self).__init__()
         self.anchors = anchors
@@ -89,29 +95,31 @@ class YOLOLayer(nn.Module):
     def forward(self, x, targets=None):
         bs = x.size(0)
         g_dim = x.size(2)
-        stride =  self.img_dim / g_dim
+        stride = self.img_dim / g_dim
         # Tensors for cuda support
         FloatTensor = torch.cuda.FloatTensor if x.is_cuda else torch.FloatTensor
         LongTensor = torch.cuda.LongTensor if x.is_cuda else torch.LongTensor
 
-        prediction = x.view(bs,  self.num_anchors, self.bbox_attrs, g_dim, g_dim).permute(0, 1, 3, 4, 2).contiguous()
+        prediction = x.view(bs, self.num_anchors, self.bbox_attrs, g_dim, g_dim).permute(0, 1, 3, 4, 2).contiguous()
 
         # Get outputs
-        x = torch.sigmoid(prediction[..., 0])          # Center x
-        y = torch.sigmoid(prediction[..., 1])          # Center y
-        w = prediction[..., 2]                         # Width
-        h = prediction[..., 3]                         # Height
-        conf = torch.sigmoid(prediction[..., 4])       # Conf
+        x = torch.sigmoid(prediction[..., 0])  # Center x
+        y = torch.sigmoid(prediction[..., 1])  # Center y
+        w = prediction[..., 2]  # Width
+        h = prediction[..., 3]  # Height
+        conf = torch.sigmoid(prediction[..., 4])  # Conf
         pred_cls = torch.sigmoid(prediction[..., 5:])  # Cls pred.
 
         # Calculate offsets for each grid
-        grid_x = torch.linspace(0, g_dim-1, g_dim).repeat(g_dim,1).repeat(bs*self.num_anchors, 1, 1).view(x.shape).type(FloatTensor)
-        grid_y = torch.linspace(0, g_dim-1, g_dim).repeat(g_dim,1).t().repeat(bs*self.num_anchors, 1, 1).view(y.shape).type(FloatTensor)
+        grid_x = torch.linspace(0, g_dim - 1, g_dim).repeat(g_dim, 1).repeat(bs * self.num_anchors, 1, 1).view(
+            x.shape).type(FloatTensor)
+        grid_y = torch.linspace(0, g_dim - 1, g_dim).repeat(g_dim, 1).t().repeat(bs * self.num_anchors, 1, 1).view(
+            y.shape).type(FloatTensor)
         scaled_anchors = [(a_w / stride, a_h / stride) for a_w, a_h in self.anchors]
         anchor_w = FloatTensor(scaled_anchors).index_select(1, LongTensor([0]))
         anchor_h = FloatTensor(scaled_anchors).index_select(1, LongTensor([1]))
-        anchor_w = anchor_w.repeat(bs, 1).repeat(1, 1, g_dim*g_dim).view(w.shape)
-        anchor_h = anchor_h.repeat(bs, 1).repeat(1, 1, g_dim*g_dim).view(h.shape)
+        anchor_w = anchor_w.repeat(bs, 1).repeat(1, 1, g_dim * g_dim).view(w.shape)
+        anchor_h = anchor_h.repeat(bs, 1).repeat(1, 1, g_dim * g_dim).view(h.shape)
 
         # Add offset and scale with anchors
         pred_boxes = FloatTensor(prediction[..., :4].shape)
@@ -128,13 +136,13 @@ class YOLOLayer(nn.Module):
                 self.bce_loss = self.bce_loss.cuda()
 
             nGT, nCorrect, mask, conf_mask, tx, ty, tw, th, tconf, tcls = build_targets(pred_boxes.cpu().data,
-                                                                            targets.cpu().data,
-                                                                            scaled_anchors,
-                                                                            self.num_anchors,
-                                                                            self.num_classes,
-                                                                            g_dim,
-                                                                            self.ignore_thres,
-                                                                            self.img_dim)
+                                                                                        targets.cpu().data,
+                                                                                        scaled_anchors,
+                                                                                        self.num_anchors,
+                                                                                        self.num_classes,
+                                                                                        g_dim,
+                                                                                        self.ignore_thres,
+                                                                                        self.img_dim)
 
             nProposals = int((conf > 0.25).sum().item())
             recall = float(nCorrect / nGT) if nGT else 1
@@ -145,12 +153,12 @@ class YOLOLayer(nn.Module):
             conf_mask = Variable(conf_mask.type(FloatTensor))
 
             # Handle target variables
-            tx    = Variable(tx.type(FloatTensor), requires_grad=False)
-            ty    = Variable(ty.type(FloatTensor), requires_grad=False)
-            tw    = Variable(tw.type(FloatTensor), requires_grad=False)
-            th    = Variable(th.type(FloatTensor), requires_grad=False)
+            tx = Variable(tx.type(FloatTensor), requires_grad=False)
+            ty = Variable(ty.type(FloatTensor), requires_grad=False)
+            tw = Variable(tw.type(FloatTensor), requires_grad=False)
+            th = Variable(th.type(FloatTensor), requires_grad=False)
             tconf = Variable(tconf.type(FloatTensor), requires_grad=False)
-            tcls  = Variable(tcls.type(FloatTensor), requires_grad=False)
+            tcls = Variable(tcls.type(FloatTensor), requires_grad=False)
 
             # Mask outputs to ignore non-existing objects
             loss_x = self.lambda_coord * self.bce_loss(x * mask, tx * mask)
@@ -165,12 +173,15 @@ class YOLOLayer(nn.Module):
 
         else:
             # If not in training phase return predictions
-            output = torch.cat((pred_boxes.view(bs, -1, 4) * stride, conf.view(bs, -1, 1), pred_cls.view(bs, -1, self.num_classes)), -1)
+            output = torch.cat(
+                (pred_boxes.view(bs, -1, 4) * stride, conf.view(bs, -1, 1), pred_cls.view(bs, -1, self.num_classes)),
+                -1)
             return output.data
 
 
 class Darknet(nn.Module):
     """YOLOv3 object detection model"""
+
     def __init__(self, config_path, img_size=416):
         super(Darknet, self).__init__()
         self.module_defs = parse_model_config(config_path)
@@ -209,19 +220,18 @@ class Darknet(nn.Module):
         self.losses['recall'] /= 3
         return sum(output) if is_training else torch.cat(output, 1)
 
-
     def load_weights(self, weights_path):
         """Parses and loads the weights stored in 'weights_path'"""
 
-        #Open the weights file
+        # Open the weights file
         fp = open(weights_path, "rb")
-        header = np.fromfile(fp, dtype=np.int32, count=5)   # First five are header values
+        header = np.fromfile(fp, dtype=np.int32, count=5)  # First five are header values
 
         # Needed to write header when saving weights
         self.header_info = header
 
         self.seen = header[3]
-        weights = np.fromfile(fp, dtype=np.float32)         # The rest are weights
+        weights = np.fromfile(fp, dtype=np.float32)  # The rest are weights
         fp.close()
 
         ptr = 0
@@ -231,7 +241,7 @@ class Darknet(nn.Module):
                 if module_def['batch_normalize']:
                     # Load BN bias, weights, running mean and running variance
                     bn_layer = module[1]
-                    num_b = bn_layer.bias.numel() # Number of biases
+                    num_b = bn_layer.bias.numel()  # Number of biases
                     # Bias
                     bn_b = torch.from_numpy(weights[ptr:ptr + num_b]).view_as(bn_layer.bias)
                     bn_layer.bias.data.copy_(bn_b)
@@ -264,6 +274,7 @@ class Darknet(nn.Module):
         @:param path    - path of the new weights file
         @:param cutoff  - save layers between 0 and cutoff (cutoff = -1 -> all are saved)
     """
+
     def save_weights(self, path, cutoff=-1):
 
         fp = open(path, 'wb')

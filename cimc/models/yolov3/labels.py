@@ -1,26 +1,3 @@
-PASCAL_VOC_LABELS = [
-    'aeroplane',
-    'bicycle',
-    'bird',
-    'boat',
-    'bottle',
-    'bus',
-    'car',
-    'cat',
-    'chair',
-    'cow',
-    'diningtable',
-    'dog',
-    'horse',
-    'motorbike',
-    'person',
-    'pottedplant',
-    'sheep',
-    'sofa',
-    'train',
-    'tvmonitor'
-]
-
 COCO_LABELS = [
     'person',
     'bicycle',
@@ -102,4 +79,27 @@ COCO_LABELS = [
     'teddy bear',
     'hair drier',
     'toothbrush'
+]
+
+PASCAL_VOC_LABELS = [
+    'aeroplane',
+    'bicycle',
+    'bird',
+    'boat',
+    'bottle',
+    'bus',
+    'car',
+    'cat',
+    'chair',
+    'cow',
+    'diningtable',
+    'dog',
+    'horse',
+    'motorbike',
+    'person',
+    'pottedplant',
+    'sheep',
+    'sofa',
+    'train',
+    'tvmonitor'
 ]

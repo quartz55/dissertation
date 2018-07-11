@@ -2,45 +2,75 @@ import os
 import time
 
 import torch
-from PIL import Image
 from torchvision.transforms import transforms as tf
 
 import cimc.utils as utils
 from cimc import resources
-from . import darknet
+from cimc.models.yolov3_2.models import Darknet
+from cimc.models.yolov3_2.utils.utils import non_max_suppression
+from cimc.utils import bench
 
 YOLOV3_WEIGHTS_URL = "https://pjreddie.com/media/files/yolov3.weights"
 YOLOV3_CFG = os.path.join(os.path.dirname(__file__), "yolov3.cfg")
 
+_bench = bench.Bench("yolov3")
 
-class YoloV3(darknet.Darknet):
+
+class YoloV3(Darknet):
     def __init__(self):
         super().__init__(YOLOV3_CFG)
-        self.pre_process = tf.Compose([tf.Resize((self.height, self.width)), tf.ToTensor()])
+        self.pre_process = tf.Compose([
+            tf.ToTensor()
+        ])
 
     def detect(self, image: utils.ImageType, confidence=0.25, nms_thres=0.4):
-        if not isinstance(image, Image.Image):
-            pp = lambda i: self.pre_process(tf.ToPILImage()(i))
-        else:
-            pp = self.pre_process
-        device = next(self.parameters()).device
-        if self.training:
-            self.eval()
-
+        m = _bench.measurements()
         t0 = time.time()
-        img_input = pp(image).unsqueeze(0).to(device)
+
+        img = utils.ToPILImage()(image)
+
+        t0_1 = time.time()
+
+        img = utils.SIMDResize((self.img_size, self.img_size))(img)
+
+        t0_2 = time.time()
+
+        img_input = self.pre_process(img).unsqueeze(0)
+
         t1 = time.time()
 
-        with torch.no_grad():
-            boxes_list = self(img_input)
-            boxes = boxes_list[0][0] + boxes_list[1][0] + boxes_list[2][0]
-            t2 = time.time()
+        device = next(self.parameters()).device
+        img_input = img_input.to(device)
 
-            boxes = nms(boxes, nms_thres)
+        t2 = time.time()
+
+        with torch.no_grad():
+            detections = self(img_input)
+
             t3 = time.time()
 
-            timings = {"pre_process": t1 - t0, "predict": t2 - t1, "nms": t3 - t2, "total": t3 - t0}
-            return boxes, timings
+            detections = non_max_suppression(detections, 80, confidence, nms_thres)
+
+            t4 = time.time()
+
+            timings = {
+                "to_image": t0_1 - t0,
+                "resize": t0_2 - t0_1,
+                "pre_process": t1 - t0_2,
+                "gpu_transfer": t2 - t1,
+                "predict": t3 - t2,
+                "nms": t4 - t3,
+                "total": t4 - t0,
+            }
+            (m
+             .add("to.image", timings["to_image"])
+             .add("resize", timings["resize"])
+             .add("pre.process", timings["pre_process"])
+             .add("gpu.transfer", timings["gpu_transfer"])
+             .add("region.proposal", timings["predict"])
+             .add("nms", timings["nms"])
+             .add("iteration", timings["total"])).done()
+            return detections, timings
 
     @classmethod
     def pre_trained(cls, weights_file: str = None):
@@ -52,45 +82,29 @@ class YoloV3(darknet.Darknet):
         return net
 
 
-def nms(boxes, nms_thresh):
-    if len(boxes) == 0:
-        return boxes
+if __name__ == '__main__':
+    import torch.onnx
+    import numpy as np
 
-    confidences = torch.zeros(len(boxes))
-    for i in range(len(boxes)):
-        confidences[i] = 1 - boxes[i][4]
+    pt_net = YoloV3.pre_trained()
+    x = torch.rand(1, 3, 416, 416, requires_grad=True)
 
-    _, sort_ids = torch.sort(confidences)
-    out_boxes = []
-    for i in range(len(boxes)):
-        box_i = boxes[sort_ids[i]]
-        if box_i[4] > 0:
-            out_boxes.append(box_i)
-            for j in range(i + 1, len(boxes)):
-                box_j = boxes[sort_ids[j]]
-                if bbox_iou(box_i, box_j) > nms_thresh:
-                    box_j[4] = 0
-    return out_boxes
+    pt_out = torch.onnx._export(pt_net, x, "yolov3.onnx", export_params=True, verbose=True)
 
+    ##########
 
-def bbox_iou(box1, box2):
-    min_x = min(box1[0] - box1[2] / 2.0, box2[0] - box2[2] / 2.0)
-    max_x = max(box1[0] + box1[2] / 2.0, box2[0] + box2[2] / 2.0)
-    min_y = min(box1[1] - box1[3] / 2.0, box2[1] - box2[3] / 2.0)
-    max_y = max(box1[1] + box1[3] / 2.0, box2[1] + box2[3] / 2.0)
-    w1 = box1[2]
-    h1 = box1[3]
-    w2 = box2[2]
-    h2 = box2[3]
-    u_width = max_x - min_x
-    u_height = max_y - min_y
-    c_width = w1 + w2 - u_width
-    c_height = h1 + h2 - u_height
-    if c_width <= 0 or c_height <= 0:
-        return 0.0
+    import onnx
 
-    area1 = w1 * h1
-    area2 = w2 * h2
-    c_area = c_width * c_height
-    u_area = area1 + area2 - c_area
-    return c_area / u_area
+    onnx_model = onnx.load("yolov3.onnx")
+
+    import onnx_caffe2.backend
+
+    c2_net = onnx_caffe2.backend.prepare(onnx_model)
+
+    W = {onnx_model.graph.input[0].name: x.data.numpy()}
+
+    c2_out = c2_net.run(W)[0]
+
+    np.testing.assert_almost_equal(pt_out.detach().numpy(), c2_out, decimal=3)
+
+    print(f"{x.shape}: torch={pt_out.shape}{pt_out[:5]}, c2={c2_out.shape}{c2_out[:5]}")

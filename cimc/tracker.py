@@ -306,6 +306,9 @@ class ParallelMultiTracker:
         self._bench = bench.Bench("par.multi.tracker")
 
     def update(self, bboxes) -> Dict[int, List[TrackedBoundingBox]]:
+        if len(bboxes) == 0:
+            return {}
+
         t0 = time.time()
 
         per_class = {cls: [] for cls in self.trackers.keys()}
